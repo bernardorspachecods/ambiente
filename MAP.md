@@ -23,5 +23,5 @@ the brief; build and run steps are in the development document.
 | --- | --- |
 | Sets the repository entry rule for agents: start from the root map, then open the document that owns the task. Holds only Ambiente's agent rules, not product or build details. | [AGENTS.md](/AGENTS.md) |
 | Product brief of Ambiente, a personal macOS menu bar app that plays local background music by folder ("ambiente") and downloads audio from YouTube links with yt-dlp. Owns the concept, behavior, stack, v1 scope and acceptance criteria; it does not describe the code layout or how to build. | [brief.md](/docs/brief.md) |
-| How to build, test, run and package Ambiente without full Xcode (Swift Package Manager plus an app-bundle script), and where the code lives. Does not define product behavior; the brief owns that. | [development.md](/docs/development.md) |
+| How to build, test, run and package Ambiente without full Xcode (Swift Package Manager plus an app-bundle script), where the code lives and how the bundled yt-dlp and ffmpeg are obtained. Does not define product behavior; the brief owns that. | [development.md](/docs/development.md) |
 <!-- BKF:GENERATED-MEMBER-INVENTORY:END -->
