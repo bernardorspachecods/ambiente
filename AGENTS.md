@@ -1,28 +1,27 @@
 ---
 bkf: document
-description: "Define as regras de trabalho específicas do repositório Ambiente e encaminha para o mapa BKF da raiz; não guarda regras de produto nem de build, que pertencem aos documentos de docs/."
+description: "Defines the working rules specific to the Ambiente repository and points to the root BKF map; holds no product or build rules, which belong to the documents in docs/."
 tags: [agents, repository]
 ---
 
-# Regras
+# Rules
 
-Mapa deste âmbito: [MAP.md](/MAP.md). Antes de uma feature, lê
-[produto.md](/docs/produto.md) para saberes o que já existe e
-[arquitetura.md](/docs/arquitetura.md) para saberes onde mexer.
+Map of this scope: [MAP.md](/MAP.md). Before a feature, read
+[product.md](/docs/product.md) to know what already exists and
+[architecture.md](/docs/architecture.md) to know where to change things.
 
-- App pessoal: sem App Store, sem sandbox, sem preocupações de distribuição.
-- Não há Xcode completo: compila-se e testa-se como diz
-  [desenvolvimento.md](/docs/desenvolvimento.md).
-- A confirmação estética é do utilizador: o agente não decide se algo está
-  bonito.
-- **Tudo o que se pode testar com código testa-se com código**, para que uma
-  feature nova que parta código antigo seja detetada logo. Só o gosto visual e
-  o que exige a app a correr (áudio real, teclas multimédia, aparência) fica à
-  verificação manual. Lógica nova vai para onde seja testável (ver
-  [arquitetura](/docs/arquitetura.md#fronteira-núcleo-e-app)) e entra com
-  testes; um defeito corrigido ganha primeiro um teste que o reproduz.
-- Depois de alterar comportamento, estrutura ou estado guardado, atualiza os
-  documentos afetados na mesma alteração e corre `bkf validate .`.
-- Quando o utilizador menciona uma ideia sem data, regista-a em
-  [ideas.md](/ideas.md) em vez de a implementar.
-- Interface em inglês, documentos em português de Portugal.
+- Personal app: no App Store, no sandbox, no distribution concerns.
+- There is no full Xcode: build and test as [development.md](/docs/development.md) says.
+- Aesthetic confirmation belongs to the user: the agent does not decide whether
+  something looks good.
+- **Everything that can be tested with code is tested with code**, so that a new
+  feature that breaks old code is caught right away. Only visual taste and what
+  needs the app running (real audio, media keys, appearance) is left to manual
+  verification. New logic goes where it is testable (see
+  [architecture](/docs/architecture.md#core-vs-app-boundary)) and comes with
+  tests; a fixed defect first gets a test that reproduces it.
+- After changing behavior, structure or saved state, update the affected
+  documents in the same change and run `bkf validate .`.
+- When the user mentions an undated idea, record it in [ideas.md](/ideas.md)
+  instead of implementing it.
+- The interface and the documents are in English.

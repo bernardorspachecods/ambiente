@@ -8,9 +8,6 @@ I made it because listening to background music on YouTube always ended with
 me watching other videos. This plays local files only, and can fetch new tracks
 from a link without leaving the app.
 
-> Personal project, built for my own Mac. It works for me; it is not polished
-> for distribution (not notarized, Apple Silicon only, no releases).
-
 ## Features
 
 - **Folders are the library.** Create a folder, drop music in it, done. No
@@ -60,9 +57,8 @@ it is your responsibility. This project is not affiliated with YouTube or Google
 
 Documentation lives in [`docs/`](docs/) and is organized with
 [BKF](MAP.md): start at [`MAP.md`](MAP.md). The short version: what the app
-does is in [`docs/produto.md`](docs/produto.md), where to change things is in
-[`docs/arquitetura.md`](docs/arquitetura.md). The docs are written in
-Portuguese; the app's interface is in English.
+does is in [`docs/product.md`](docs/product.md), where to change things is in
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Credits
 

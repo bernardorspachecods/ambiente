@@ -1,58 +1,57 @@
 ---
 bkf: document
-description: "Define a estrutura e as regras da interface do Ambiente (popover da menu bar, páginas, padrões de renomear/apagar/menus de contexto, idioma, ícone). Não descreve cada componente, que o código mostra; o comportamento de produto está em produto.md."
-tags: [ui, produto]
+description: "Defines the structure and rules of Ambiente's interface (the menu bar popover, its pages, the rename/delete/context-menu patterns, language, icons). Does not describe each component, which the code shows; product behavior is in product.md."
+tags: [ui, product]
 ---
 
 # Ambiente — interface
 
-## Regras
+## Rules
 
-- **Só componentes e estilos nativos do SwiftUI**, sem cores nem fontes
-  próprias; modo escuro automático. A confirmação estética é do utilizador.
-- **Interface toda em inglês**, incluindo mensagens de erro vindas do núcleo.
-  Os documentos estão em português.
-- Janela do tipo `MenuBarExtra(.window)` com 300 pt de largura; sem janela
-  principal nem Dock.
-- Nenhum controlo aceita foco de teclado, salvo os campos de texto (razão em
-  [arquitetura](/docs/arquitetura.md#decisões-e-armadilhas)). Um controlo novo
-  tem de ser marcado `focusable(false)`.
-- Ao abrir o menu: volta à página principal, "Add by link" recolhido (salvo se
-  houver descarregamentos em curso), o ambiente ativo aberto, e os
-  descarregamentos concluídos desaparecem; os falhados ficam até serem
-  dispensados.
+- **Native SwiftUI components and styles only**, with no custom colors or fonts;
+  automatic dark mode. Aesthetic confirmation belongs to the user.
+- **The whole interface and the documents are in English**, including error
+  messages coming from the core.
+- A `MenuBarExtra(.window)` popover 300 pt wide; no main window and no Dock icon.
+- No control accepts keyboard focus, except text fields (reason in
+  [architecture](/docs/architecture.md#decisions-and-pitfalls)). A new control
+  must be marked `focusable(false)`.
+- When the menu opens: it returns to the main page, "Add by link" is collapsed
+  (unless downloads are running), the active ambiente is expanded, and finished
+  downloads disappear; failed ones stay until dismissed.
 
-## Estrutura
+## Structure
 
-**Página principal**, de cima para baixo: imagem, título, artista e ambiente
-da faixa; linha de tempo; shuffle, anterior, play/pause, seguinte, repeat;
-volume; lista de ambientes (cada um expansível para as faixas); "Add by link";
-aviso de atualização do `yt-dlp` (só quando há versão nova); engrenagem e Quit.
+**Main page**, top to bottom: cover image, title, artist and ambiente of the
+track; timeline; shuffle, previous, play/pause, next, repeat; volume; the list
+of ambientes (each expandable to its tracks); "Add by link"; the `yt-dlp` update
+notice (only when there is a newer version); the gear and Quit.
 
-**Definições**, página dentro do popover, por funções: General (abrir no
-arranque), Library (caminho e abrir no Finder), Downloads (versão e atualização
-do `yt-dlp`). Novas opções entram na secção da sua função.
+**Settings**, a page inside the popover, grouped by function: General (open at
+login), Library (path and open in Finder), Downloads (`yt-dlp` version and
+update). New options go in the section of their function.
 
-## Padrões
+## Patterns
 
-- **Linha de ambiente:** o nome abre/fecha a lista; um botão play toca o
-  ambiente; um botão de pasta abre-o no Finder. O mesmo chevron e espaçamento
-  valem para qualquer grupo expansível.
-- **Faixa:** clicar toca; o altifalante azul marca a faixa atual.
-- **Menu de contexto** (botão direito) em faixas e ambientes: Rename…,
-  Show in Finder, Move to Trash…. Ações novas sobre itens da biblioteca vão
-  para este menu, não para botões permanentes.
-- **Renomear** é inline na linha (Return grava, Esc cancela); erros aparecem
-  acima da lista. **Apagar** pede confirmação inline antes de mover para o Lixo.
+- **Ambiente row:** the name expands/collapses the list; a play button plays the
+  ambiente; a folder button opens it in Finder. The same chevron and spacing
+  apply to any expandable group.
+- **Track:** clicking plays it; the blue speaker marks the current track.
+- **Context menu** (right click) on tracks and ambientes: Rename…, Show in
+  Finder, Move to Trash…. New actions on library items go in this menu, not in
+  permanent buttons.
+- **Renaming** is inline in the row (Return saves, Esc cancels); errors appear
+  above the list. **Deleting** asks for inline confirmation before moving to the
+  Trash.
 
-## Ícone da menu bar
+## Icons
 
-Um blobatar azul ([blobatar.dev](https://blobatar.dev), MIT) para o nome
-"Simpilco": cara `happy` a tocar e `sleepy` esbatida em pausa. O blob não tem
-boca em nenhuma expressão. Os SVG em `Resources/MenuIcon/` são a fonte; os PNG
-são renders de 72 px com a área cortada ao blob. Sem os PNG no bundle, a app
-volta aos símbolos do sistema.
+**Menu bar:** a blue blobatar ([blobatar.dev](https://blobatar.dev), MIT) for the
+name "Simpilco": a `happy` face while playing and a faded `sleepy` one while
+paused. The blob has no mouth in any expression. The SVGs in
+`Resources/MenuIcon/` are the source; the PNGs are 72 px renders cropped to the
+blob. Without the PNGs in the bundle, the app falls back to system symbols.
 
-O ícone da app (`Resources/AppIcon.icns`, visível no Finder e nas definições de
-arranque; a app não tem ícone no Dock) é o mesmo blob sobre um quadrado
-arredondado claro, gerado por `scripts/make-icon.sh`.
+**App:** `Resources/AppIcon.icns` (visible in Finder and in the login items
+settings; the app has no Dock icon) is the same blob on a soft rounded square,
+generated by `scripts/make-icon.sh`.
