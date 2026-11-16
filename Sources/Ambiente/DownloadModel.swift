@@ -6,11 +6,27 @@ import Observation
 @MainActor
 @Observable
 final class DownloadModel {
-    enum State: Equatable {
-        case idle
-        case downloading(progress: Double?)
-        case done(folder: URL)
-        case failed(String)
+    struct Job: Identifiable, Equatable {
+        enum Status: Equatable {
+            case queued
+            case downloading(progress: Double?)
+            case done
+            case failed(String)
+        }
+
+        let id = UUID()
+        let url: URL
+        let folder: URL
+        var title: String?
+        var status: Status = .queued
+
+        var displayName: String { title ?? url.absoluteString }
+        var isActive: Bool {
+            switch status {
+            case .queued, .downloading: true
+            case .done, .failed: false
+            }
+        }
     }
 
     enum UpdateState: Equatable {
@@ -19,7 +35,10 @@ final class DownloadModel {
         case failed(String)
     }
 
-    private(set) var state: State = .idle
+    private(set) var jobs: [Job] = []
+    /// Called on the main actor each time a track lands in the library.
+    @ObservationIgnored var onTrackAdded: (() -> Void)?
+    static let maxConcurrent = 3
     private(set) var updateState: UpdateState = .idle
     private(set) var installedVersion: String?
     private(set) var latestVersion: String?
@@ -38,12 +57,11 @@ final class DownloadModel {
         return x.lexicographicallyPrecedes(y) == false && x != y
     }
 
-    var isBusy: Bool {
-        if case .downloading = state { return true }
-        return updateState == .updating
-    }
+    var isBusy: Bool { updateState == .updating }
+    var isDownloading: Bool { jobs.contains { $0.isActive } }
 
-    @ObservationIgnored private var process: Process?
+    @ObservationIgnored private var processes: [UUID: Process] = [:]
+    @ObservationIgnored private var cancelled: Set<UUID> = []
 
     private static var scratchRoot: URL { Binaries.supportDirectory.appendingPathComponent("downloads", isDirectory: true) }
 
@@ -53,7 +71,7 @@ final class DownloadModel {
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.process?.terminate() }
+            MainActor.assumeIsolated { self?.processes.values.forEach { $0.terminate() } }
         }
     }
 
@@ -76,35 +94,77 @@ final class DownloadModel {
         return true
     }
 
-    /// Downloads one video's audio as m4a into `folder`. Calls `onFinish` on success.
-    func download(link: String, into folder: AmbienteFolder, onFinish: @escaping () -> Void) {
-        guard !isBusy else { return }
-        guard let url = YouTubeDownload.validatedURL(link) else {
-            state = .failed("That doesn't look like a valid link (http/https).")
-            return
+    // MARK: Jobs
+
+    /// Queues one download per link into `folder`; up to `maxConcurrent` run at once.
+    func enqueue(_ urls: [URL], into folder: URL) {
+        for url in urls {
+            if jobs.contains(where: { $0.isActive && $0.url == url && $0.folder == folder }) { continue }
+            var job = Job(url: url, folder: folder)
+            if Binaries.ytDlp == nil {
+                job.status = .failed("yt-dlp not found in the app. Run scripts/fetch-binaries.sh and rebuild the app.")
+            }
+            jobs.append(job)
         }
+        pump()
+    }
+
+    /// Cancels an active job or dismisses a finished one.
+    func remove(_ id: UUID) {
+        if let process = processes[id] {
+            cancelled.insert(id)
+            process.terminate()
+        } else {
+            jobs.removeAll { $0.id == id }
+        }
+    }
+
+    func clearDone() {
+        jobs.removeAll { $0.status == .done }
+    }
+
+    private func update(_ id: UUID, _ change: (inout Job) -> Void) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        change(&jobs[index])
+    }
+
+    private func pump() {
+        while processes.count < Self.maxConcurrent,
+              let next = jobs.first(where: { $0.status == .queued && processes[$0.id] == nil }) {
+            start(next)
+        }
+    }
+
+    private func start(_ job: Job) {
         guard let ytDlp = Binaries.ytDlp else {
-            state = .failed("yt-dlp not found in the app. Run scripts/fetch-binaries.sh and rebuild the app.")
+            update(job.id) { $0.status = .failed("yt-dlp not found in the app.") }
             return
         }
-        state = .downloading(progress: nil)
+        let id = job.id
+        let folder = job.folder
+        update(id) { $0.status = .downloading(progress: nil) }
+
+        // Work in a scratch folder and publish only a finished file, so an interrupted
+        // download never leaves a truncated track (or its .webm/.webp leftovers) in the library.
+        let scratch = Self.scratchRoot.appendingPathComponent(id.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
 
         let proc = Process()
         proc.executableURL = ytDlp
-        // Work in a scratch folder and publish only a finished file, so an interrupted
-        // download never leaves a truncated track (or its .webm/.webp leftovers) in the library.
-        let scratch = Self.scratchRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        proc.arguments = YouTubeDownload.arguments(url: url, folder: scratch, ffmpeg: Binaries.ffmpeg)
+        proc.arguments = YouTubeDownload.arguments(url: job.url, folder: scratch, ffmpeg: Binaries.ffmpeg)
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
 
         let collector = OutputCollector { [weak self] line in
-            guard let progress = YouTubeDownload.progress(fromLine: line) else { return }
+            let progress = YouTubeDownload.progress(fromLine: line)
+            let title = YouTubeDownload.title(fromLine: line)
+            guard progress != nil || title != nil else { return }
             Task { @MainActor in
-                guard let self, case .downloading = self.state else { return }
-                self.state = .downloading(progress: progress)
+                self?.update(id) { job in
+                    if let title, job.title == nil { job.title = title }
+                    if let progress, case .downloading = job.status { job.status = .downloading(progress: progress) }
+                }
             }
         }
         pipe.fileHandleForReading.readabilityHandler = { handle in
@@ -115,38 +175,32 @@ final class DownloadModel {
             collector.append(pipe.fileHandleForReading.readDataToEndOfFile())
             let output = collector.text
             let status = finished.terminationStatus
-            let published = status == 0 && Self.publish(from: scratch, to: folder.url)
+            let published = status == 0 && Self.publish(from: scratch, to: folder)
             try? FileManager.default.removeItem(at: scratch)
             Task { @MainActor in
                 guard let self else { return }
-                self.process = nil
-                if status == 0, !published {
-                    self.state = .failed("The download finished but no audio file was produced.")
+                self.processes[id] = nil
+                if self.cancelled.remove(id) != nil {
+                    self.jobs.removeAll { $0.id == id }
+                } else if status == 0, !published {
+                    self.update(id) { $0.status = .failed("The download finished but no audio file was produced.") }
                 } else if status == 0 {
-                    self.state = .done(folder: folder.url)
-                    onFinish()
-                } else if finished.terminationReason == .uncaughtSignal {
-                    self.state = .idle
+                    self.update(id) { $0.status = .done }
+                    self.onTrackAdded?()
                 } else {
-                    self.state = .failed(YouTubeDownload.errorMessage(fromOutput: output))
+                    self.update(id) { $0.status = .failed(YouTubeDownload.errorMessage(fromOutput: output)) }
                 }
+                self.pump()
             }
         }
         do {
             try proc.run()
-            process = proc
+            processes[id] = proc
         } catch {
             pipe.fileHandleForReading.readabilityHandler = nil
-            state = .failed("Could not run yt-dlp: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: scratch)
+            update(id) { $0.status = .failed("Could not run yt-dlp: \(error.localizedDescription)") }
         }
-    }
-
-    func cancel() {
-        process?.terminate()
-    }
-
-    func dismissStatus() {
-        if !isBusy { state = .idle }
     }
 
     // MARK: yt-dlp updates

@@ -13,6 +13,25 @@ public enum YouTubeDownload {
         return url
     }
 
+    /// Every valid http(s) link in free text (separated by spaces, newlines or commas),
+    /// in order and without duplicates.
+    public static func links(from text: String) -> [URL] {
+        var seen = Set<URL>()
+        return text
+            .split(whereSeparator: { $0.isWhitespace || $0 == "," })
+            .compactMap { validatedURL(String($0)) }
+            .filter { seen.insert($0).inserted }
+    }
+
+    /// The title yt-dlp is working on, from a `[download] Destination: <path>` line.
+    public static func title(fromLine line: String) -> String? {
+        let prefix = "[download] Destination:"
+        guard line.hasPrefix(prefix) else { return nil }
+        let path = line.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+        let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        return name.isEmpty ? nil : name
+    }
+
     /// Arguments for a single-video audio download into `folder` as m4a.
     /// `--` ends option parsing so a link can never be read as a flag.
     public static func arguments(url: URL, folder: URL, ffmpeg: URL?) -> [String] {

@@ -15,6 +15,7 @@ struct MenuView: View {
     @State private var renameError: String?
     @State private var pendingDelete: URL?
     @State private var link = ""
+    @State private var linkError: String?
     @State private var targetName = ""
     @State private var newName = ""
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -35,7 +36,9 @@ struct MenuView: View {
         .onAppear {
             showSettings = false
             renaming = nil
-            if case .downloading = downloads.state {} else { showAddByLink = false }
+            if !downloads.isDownloading { showAddByLink = false }
+            downloads.clearDone()
+            downloads.onTrackAdded = { player.refreshFolders() }
             player.refreshFolders()
             if targetName != Self.newTag, !player.folders.contains(where: { $0.name == targetName }) {
                 targetName = player.activeFolder?.name ?? player.folders.first?.name ?? Self.newTag
@@ -195,31 +198,25 @@ struct MenuView: View {
         }
     }
 
+    private func chevron(open: Bool) -> some View {
+        Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .rotationEffect(.degrees(open ? 90 : 0))
+            .frame(width: 12)
+    }
+
     private func folderRow(_ folder: AmbienteFolder) -> some View {
-        DisclosureGroup(isExpanded: Binding(
-            get: { expanded.contains(folder.id) },
-            set: { if $0 { expanded.insert(folder.id) } else { expanded.remove(folder.id) } }
-        )) {
-            let _ = player.libraryVersion
-            let tracks = player.tracks(in: folder)
-            VStack(alignment: .leading, spacing: 2) {
-                if tracks.isEmpty {
-                    Text("No tracks yet").font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(tracks, id: \.self) { track in
-                    trackRow(track, in: folder)
-                }
-            }
-            .padding(.top, 2)
-        } label: {
+        let isOpen = expanded.contains(folder.id)
+        return VStack(alignment: .leading, spacing: 2) {
             if renaming == folder.url {
                 renameField { try player.renameFolder(folder, to: $0) }
             } else {
-                HStack {
+                HStack(spacing: 6) {
                     Button {
                         toggleExpanded(folder)
                     } label: {
-                        HStack {
+                        HStack(spacing: 6) {
+                            chevron(open: isOpen)
                             Text(folder.name)
                             Spacer()
                         }
@@ -249,6 +246,20 @@ struct MenuView: View {
                     Divider()
                     Button("Move to Trash…", role: .destructive) { pendingDelete = folder.url }
                 }
+            }
+            if isOpen {
+                let _ = player.libraryVersion
+                let tracks = player.tracks(in: folder)
+                VStack(alignment: .leading, spacing: 2) {
+                    if tracks.isEmpty {
+                        Text("No tracks yet").font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(tracks, id: \.self) { track in
+                        trackRow(track, in: folder)
+                    }
+                }
+                .padding(.leading, 18)
+                .padding(.top, 2)
             }
         }
     }
@@ -347,10 +358,7 @@ struct MenuView: View {
                 showAddByLink.toggle()
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .rotationEffect(.degrees(showAddByLink ? 90 : 0))
-                        .frame(width: 12)
+                    chevron(open: showAddByLink)
                     Text("Add by link")
                     Spacer()
                 }
@@ -363,10 +371,12 @@ struct MenuView: View {
 
     private var addByLinkContent: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("Paste a YouTube link", text: $link)
+            TextField("Paste one or more YouTube links", text: $link, axis: .vertical)
+                .lineLimit(1...4)
                 .textFieldStyle(.roundedBorder)
-            .focusEffectDisabled(false)
+                .focusEffectDisabled(false)
                 .onSubmit(startDownload)
+                .onChange(of: link) { _, _ in linkError = nil }
             HStack {
                 Picker("Ambiente", selection: $targetName) {
                     ForEach(player.folders) { Text($0.name).tag($0.name) }
@@ -374,46 +384,58 @@ struct MenuView: View {
                     Text("New ambiente…").tag(Self.newTag)
                 }
                 .labelsHidden()
-                if case .downloading = downloads.state {
-                    Button("Cancel", action: downloads.cancel)
-                } else {
-                    Button("Download", action: startDownload)
-                        .disabled(link.isEmpty || resolvedTarget() == nil || downloads.isBusy)
-                }
+                Button("Download", action: startDownload)
+                    .disabled(link.isEmpty || resolvedTarget() == nil)
             }
             if targetName == Self.newTag {
                 TextField("New ambiente name", text: $newName)
                     .textFieldStyle(.roundedBorder)
-            .focusEffectDisabled(false)
+                    .focusEffectDisabled(false)
                     .onSubmit(startDownload)
             }
-            downloadStatus
+            if let linkError {
+                Label(linkError, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+            ForEach(downloads.jobs) { job in
+                jobRow(job)
+            }
         }
     }
 
-    @ViewBuilder private var downloadStatus: some View {
-        switch downloads.state {
-        case .idle:
-            EmptyView()
-        case .downloading(let progress):
-            if let progress {
-                ProgressView(value: progress)
-            } else {
-                ProgressView().progressViewStyle(.linear)
-            }
-        case .done(let folder):
-            HStack(alignment: .firstTextBaseline) {
-                Label("Saved to \(Self.display(folder))", systemImage: "checkmark.circle")
+    private func jobRow(_ job: DownloadModel.Job) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(job.displayName)
                     .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer()
-                Button("Show") { NSWorkspace.shared.open(folder) }
-                    .buttonStyle(.link)
+                Button { downloads.remove(job.id) } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help(job.isActive ? "Cancel" : "Dismiss")
             }
-        case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle")
-                .font(.callout)
-                .foregroundStyle(.red)
-                .textSelection(.enabled)
+            switch job.status {
+            case .queued:
+                Text("Waiting…").font(.caption).foregroundStyle(.secondary)
+            case .downloading(let progress):
+                if let progress {
+                    ProgressView(value: progress)
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
+            case .done:
+                Label("Saved to \(Self.display(job.folder))", systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
         }
     }
 
@@ -509,18 +531,19 @@ struct MenuView: View {
 
     private func startDownload() {
         guard let folder = resolvedTarget(), !link.isEmpty else { return }
-        let isNew = targetName == Self.newTag
-        if isNew {
+        let urls = YouTubeDownload.links(from: link)
+        guard !urls.isEmpty else {
+            linkError = "No valid link found (http/https)."
+            return
+        }
+        if targetName == Self.newTag {
             try? FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
-        }
-        downloads.download(link: link, into: folder) {
-            link = ""
             player.refreshFolders()
-            if isNew {
-                newName = ""
-                targetName = folder.name
-            }
+            newName = ""
+            targetName = folder.name
         }
+        downloads.enqueue(urls, into: folder.url)
+        link = ""
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {

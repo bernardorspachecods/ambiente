@@ -170,6 +170,18 @@ import Testing
         #expect(args.contains("/app/ffmpeg"))
     }
 
+    @Test func extractsLinksFromPastedText() {
+        let text = "https://youtu.be/a\nhttps://youtu.be/b, junk https://youtu.be/a\n  https://youtu.be/c  "
+        let links = YouTubeDownload.links(from: text).map(\.absoluteString)
+        #expect(links == ["https://youtu.be/a", "https://youtu.be/b", "https://youtu.be/c"])
+        #expect(YouTubeDownload.links(from: "nothing here").isEmpty)
+    }
+
+    @Test func readsTitleFromDestinationLine() {
+        #expect(YouTubeDownload.title(fromLine: "[download] Destination: /tmp/x/Me at the zoo.webm") == "Me at the zoo")
+        #expect(YouTubeDownload.title(fromLine: "[download]  42.5% of 3MiB") == nil)
+    }
+
     @Test func parsesProgress() {
         #expect(YouTubeDownload.progress(fromLine: "[download]  42.5% of 3.21MiB at 1.00MiB/s ETA 00:02") == 0.425)
         #expect(YouTubeDownload.progress(fromLine: "[download] 100% of 3.21MiB") == 1)
