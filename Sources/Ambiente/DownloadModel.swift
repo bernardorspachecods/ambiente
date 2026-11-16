@@ -1,4 +1,5 @@
 import AmbienteCore
+import AppKit
 import Foundation
 import Observation
 
@@ -44,6 +45,37 @@ final class DownloadModel {
 
     @ObservationIgnored private var process: Process?
 
+    private static var scratchRoot: URL { Binaries.supportDirectory.appendingPathComponent("downloads", isDirectory: true) }
+
+    init() {
+        // No download can be running at launch, so anything here is debris from an interrupted one.
+        try? FileManager.default.removeItem(at: Self.scratchRoot)
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.process?.terminate() }
+        }
+    }
+
+    /// Moves finished m4a files from `scratch` into `folder`, never overwriting existing tracks.
+    private nonisolated static func publish(from scratch: URL, to folder: URL) -> Bool {
+        let fm = FileManager.default
+        let files = ((try? fm.contentsOfDirectory(at: scratch, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension.lowercased() == "m4a" }
+        guard !files.isEmpty else { return false }
+        for file in files {
+            var target = folder.appendingPathComponent(file.lastPathComponent)
+            var n = 2
+            while fm.fileExists(atPath: target.path) {
+                let base = file.deletingPathExtension().lastPathComponent
+                target = folder.appendingPathComponent("\(base) (\(n)).m4a")
+                n += 1
+            }
+            guard (try? fm.moveItem(at: file, to: target)) != nil else { return false }
+        }
+        return true
+    }
+
     /// Downloads one video's audio as m4a into `folder`. Calls `onFinish` on success.
     func download(link: String, into folder: AmbienteFolder, onFinish: @escaping () -> Void) {
         guard !isBusy else { return }
@@ -59,7 +91,11 @@ final class DownloadModel {
 
         let proc = Process()
         proc.executableURL = ytDlp
-        proc.arguments = YouTubeDownload.arguments(url: url, folder: folder.url, ffmpeg: Binaries.ffmpeg)
+        // Work in a scratch folder and publish only a finished file, so an interrupted
+        // download never leaves a truncated track (or its .webm/.webp leftovers) in the library.
+        let scratch = Self.scratchRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        proc.arguments = YouTubeDownload.arguments(url: url, folder: scratch, ffmpeg: Binaries.ffmpeg)
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
@@ -79,10 +115,14 @@ final class DownloadModel {
             collector.append(pipe.fileHandleForReading.readDataToEndOfFile())
             let output = collector.text
             let status = finished.terminationStatus
+            let published = status == 0 && Self.publish(from: scratch, to: folder.url)
+            try? FileManager.default.removeItem(at: scratch)
             Task { @MainActor in
                 guard let self else { return }
                 self.process = nil
-                if status == 0 {
+                if status == 0, !published {
+                    self.state = .failed("The download finished but no audio file was produced.")
+                } else if status == 0 {
                     self.state = .done(folder: folder.url)
                     onFinish()
                 } else if finished.terminationReason == .uncaughtSignal {
