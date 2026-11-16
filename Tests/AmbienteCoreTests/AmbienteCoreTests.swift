@@ -2,9 +2,9 @@ import Testing
 @testable import AmbienteCore
 
 
-@Suite struct ShuffleQueueTests {
+@Suite struct PlayQueueTests {
     @Test func playsEveryTrackOncePerRound() {
-        var queue = ShuffleQueue(tracks: urls(["a", "b", "c"]))
+        var queue = PlayQueue(tracks: urls(["a", "b", "c"]))
         var seen = [queue.current!]
         seen.append(queue.next()!)
         seen.append(queue.next()!)
@@ -13,7 +13,7 @@ import Testing
 
     @Test func newRoundNeverRepeatsLastTrackFirst() {
         // A shuffler that always returns the same order would repeat the boundary track.
-        var queue = ShuffleQueue(tracks: urls(["a", "b"]), shuffler: { $0 })
+        var queue = PlayQueue(tracks: urls(["a", "b"]), shuffler: { $0 })
         #expect(queue.current == url("a"))
         queue.next()  // b
         let next = queue.next()  // new round
@@ -21,7 +21,7 @@ import Testing
     }
 
     @Test func loopsForever() {
-        var queue = ShuffleQueue(tracks: urls(["a"]))
+        var queue = PlayQueue(tracks: urls(["a"]))
         for _ in 0..<5 {
             let next = queue.next()
             #expect(next == url("a"))
@@ -29,7 +29,7 @@ import Testing
     }
 
     @Test func emptyQueueYieldsNothing() {
-        var queue = ShuffleQueue(tracks: [])
+        var queue = PlayQueue(tracks: [])
         let next = queue.next()
         let previous = queue.previous()
         #expect(queue.current == nil)
@@ -38,7 +38,7 @@ import Testing
     }
 
     @Test func previousStopsAtRoundStart() {
-        var queue = ShuffleQueue(tracks: urls(["a", "b", "c"]), shuffler: { $0 })
+        var queue = PlayQueue(tracks: urls(["a", "b", "c"]), shuffler: { $0 })
         queue.next()
         let first = queue.previous()
         let again = queue.previous()
@@ -47,7 +47,7 @@ import Testing
     }
 
     @Test func updateKeepsPlayingTrackAndAddsNew() {
-        var queue = ShuffleQueue(tracks: urls(["a", "b"]), shuffler: { $0 })
+        var queue = PlayQueue(tracks: urls(["a", "b"]), shuffler: { $0 })
         let kept = queue.update(tracks: urls(["a", "b", "c"]))
         #expect(kept)
         #expect(queue.current == url("a"))
@@ -55,9 +55,50 @@ import Testing
     }
 
     @Test func updateReportsRemovedPlayingTrack() {
-        var queue = ShuffleQueue(tracks: urls(["a", "b"]), shuffler: { $0 })
+        var queue = PlayQueue(tracks: urls(["a", "b"]), shuffler: { $0 })
         let kept = queue.update(tracks: urls(["b"]))
         #expect(!kept)
+    }
+}
+
+@Suite struct PlayQueueModeTests {
+    @Test func unshuffledPlaysInFileOrder() {
+        var queue = PlayQueue(tracks: urls(["a", "b", "c"]), shuffled: false)
+        let b = queue.next()
+        let c = queue.next()
+        let a = queue.next()
+        #expect(b == url("b"))
+        #expect(c == url("c"))
+        #expect(a == url("a"))
+    }
+
+    @Test func noWrapStopsAtEnd() {
+        var queue = PlayQueue(tracks: urls(["a", "b"]), shuffled: false)
+        queue.next()
+        let end = queue.next(wrap: false)
+        #expect(end == nil)
+        #expect(queue.current == url("b"))
+        queue.rewind()
+        #expect(queue.current == url("a"))
+    }
+
+    @Test func togglingShuffleKeepsCurrentTrack() {
+        var queue = PlayQueue(tracks: urls(["a", "b", "c"]), shuffled: false)
+        queue.next()
+        queue.setShuffled(true)
+        #expect(queue.current == url("b"))
+        queue.setShuffled(false)
+        #expect(queue.current == url("b"))
+        let c = queue.next()
+        #expect(c == url("c"))
+    }
+
+    @Test func unshuffledUpdateKeepsFileOrder() {
+        var queue = PlayQueue(tracks: urls(["a", "c"]), shuffled: false)
+        queue.next()
+        let kept = queue.update(tracks: urls(["a", "b", "c"]))
+        #expect(kept)
+        #expect(queue.current == url("c"))
     }
 }
 

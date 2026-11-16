@@ -7,6 +7,7 @@ struct MenuView: View {
     var downloads: DownloadModel
 
     @State private var showSettings = false
+    @State private var scrubTime: Double?
     @State private var link = ""
     @State private var targetName = ""
     @State private var newName = ""
@@ -80,19 +81,57 @@ struct MenuView: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 20) {
-            Spacer()
-            Button(action: player.previous) { Image(systemName: "backward.fill") }
-            Button(action: player.togglePlayPause) {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .frame(width: 20)
+        VStack(spacing: 6) {
+            timeline
+            HStack(spacing: 20) {
+                Button { player.shuffle.toggle() } label: {
+                    Image(systemName: "shuffle")
+                        .foregroundStyle(player.shuffle ? Color.accentColor : Color.secondary)
+                }
+                .help(player.shuffle ? "Shuffle on" : "Shuffle off")
+                Button(action: player.previous) { Image(systemName: "backward.fill") }
+                Button(action: player.togglePlayPause) {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(width: 20)
+                }
+                Button(action: player.next) { Image(systemName: "forward.fill") }
+                Button(action: player.cycleRepeat) {
+                    Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
+                        .foregroundStyle(player.repeatMode == .off ? Color.secondary : Color.accentColor)
+                }
+                .help(Self.repeatHelp(player.repeatMode))
             }
-            Button(action: player.next) { Image(systemName: "forward.fill") }
-            Spacer()
+            .buttonStyle(.borderless)
+            .imageScale(.large)
         }
-        .buttonStyle(.borderless)
-        .imageScale(.large)
         .disabled(player.activeFolder == nil || player.trackCount == 0)
+    }
+
+    private var timeline: some View {
+        VStack(spacing: 0) {
+            Slider(
+                value: Binding(
+                    get: { scrubTime ?? player.currentTime },
+                    set: { scrubTime = $0 }
+                ),
+                in: 0...max(player.duration, 1)
+            ) { editing in
+                if !editing, let time = scrubTime {
+                    player.seek(to: time)
+                    scrubTime = nil
+                }
+            }
+            .controlSize(.small)
+            .labelsHidden()
+            .disabled(player.duration <= 0)
+            HStack {
+                Text(Self.format(scrubTime ?? player.currentTime))
+                Spacer()
+                Text("-" + Self.format(max(player.duration - (scrubTime ?? player.currentTime), 0)))
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
     }
 
     private var environmentList: some View {
@@ -155,12 +194,6 @@ struct MenuView: View {
                 TextField("New ambiente name", text: $newName)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(startDownload)
-            }
-            if let target = resolvedTarget(), downloads.state == .idle {
-                Label("Saves to \(Self.display(target.url))", systemImage: "arrow.down.to.line")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
             downloadStatus
         }
@@ -280,6 +313,20 @@ struct MenuView: View {
         } catch {
             loginError = error.localizedDescription
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    private static func format(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    private static func repeatHelp(_ mode: RepeatMode) -> String {
+        switch mode {
+        case .off: "Repeat off"
+        case .all: "Repeat all"
+        case .one: "Repeat one"
         }
     }
 
