@@ -36,6 +36,7 @@ struct MenuView: View {
         .onAppear {
             showSettings = false
             renaming = nil
+            pendingDelete = nil
             if !downloads.isDownloading { showAddByLink = false }
             downloads.clearDone()
             downloads.onTrackAdded = { player.refreshFolders() }
@@ -422,7 +423,7 @@ struct MenuView: View {
         }
     }
 
-    private func jobRow(_ job: DownloadModel.Job) -> some View {
+    private func jobRow(_ job: DownloadJob) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(job.displayName)
@@ -562,8 +563,10 @@ struct MenuView: View {
             return
         }
         if targetName == Self.newTag {
-            try? FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
-            player.refreshFolders()
+            guard player.createFolder(folder) else {
+                linkError = "Could not create the ambiente."
+                return
+            }
             newName = ""
             targetName = folder.name
         }

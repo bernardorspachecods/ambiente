@@ -42,7 +42,9 @@ F=/Library/Developer/CommandLineTools/Library/Developer/Frameworks
 swift test -Xswiftc -F -Xswiftc $F -Xlinker -F -Xlinker $F -Xlinker -rpath -Xlinker $F
 ```
 
-Só o núcleo tem testes. Em `#expect`, não chamar métodos `mutating` diretamente:
+Só o núcleo tem testes automáticos; o que fica de fora é o que exige a app a
+correr (ver [arquitetura](/docs/arquitetura.md#fronteira-núcleo-e-app)). Um
+defeito corrigido ganha primeiro um teste que o reproduz. Em `#expect`, não chamar métodos `mutating` diretamente:
 guardar o resultado numa variável antes.
 
 ## Verificação manual

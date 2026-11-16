@@ -176,6 +176,7 @@ import Testing
 
     @Test func argumentsAreSingleVideoM4aAndEndOptions() {
         let args = sampleArguments()
+        #expect(args.first == "--ignore-config")
         #expect(args.contains("--no-playlist"))
         #expect(args.contains("m4a"))
         #expect(args.suffix(2) == ["--", "https://youtu.be/x"])
@@ -205,5 +206,231 @@ import Testing
         let out = "[youtube] x: Downloading\nERROR: [youtube] x: Video unavailable\n"
         #expect(YouTubeDownload.errorMessage(fromOutput: out) == "[youtube] x: Video unavailable")
         #expect(YouTubeDownload.errorMessage(fromOutput: "") == "The download failed.")
+    }
+}
+
+@Suite struct LibraryFilesTests {
+    @Test func renamesTrackKeepingExtension() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["Sad/old.m4a"])
+        #expect(renameTrack(root, "Sad/old.m4a", to: "  New name ") == "New name.m4a")
+        #expect(listing(root, "Sad") == ["New name.m4a"])
+        // Typing the extension does not double it.
+        #expect(renameTrack(root, "Sad/New name.m4a", to: "Other.M4A") == "Other.m4a")
+    }
+
+    @Test func refusesToReplaceAnExistingTrack() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["Sad/a.m4a", "Sad/b.m4a"])
+        #expect(renameTrack(root, "Sad/a.m4a", to: "b").hasPrefix("error:"))
+        #expect(contents(root, "Sad/b.m4a") == "Sad/b.m4a")
+        #expect(listing(root, "Sad") == ["a.m4a", "b.m4a"])
+    }
+
+    @Test func rejectsInvalidNames() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["Sad/a.m4a"])
+        #expect(renameTrack(root, "Sad/a.m4a", to: "   ").hasPrefix("error:"))
+        #expect(renameTrack(root, "Sad/a.m4a", to: "...").hasPrefix("error:"))
+        #expect(renameTrack(root, "Sad/a.m4a", to: "../x") == "-x.m4a")
+        #expect(listing(root, "Sad") == ["-x.m4a"])
+    }
+
+    @Test func caseOnlyTrackRenameWorksAndLeavesNoTempFile() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["Sad/Song.m4a"])
+        #expect(renameTrack(root, "Sad/Song.m4a", to: "song") == "song.m4a")
+        #expect(listing(root, "Sad") == ["song.m4a"])
+    }
+
+    @Test func renamesFolderAndRefusesCollision() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["Lowfi/a.m4a", "Sad/b.m4a"])
+        #expect(renameFolder(root, "Lowfi", to: "Chill") == "Chill")
+        #expect(listing(root) == ["Chill", "Sad"])
+        #expect(renameFolder(root, "Chill", to: "Sad").hasPrefix("error:"))
+        #expect(listing(root, "Sad") == ["b.m4a"])
+    }
+
+    @Test func caseOnlyFolderRenameLeavesNoHiddenFolder() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["lowfi/a.m4a"])
+        #expect(renameFolder(root, "lowfi", to: "Lowfi") == "Lowfi")
+        #expect(listing(root) == ["Lowfi"])
+        #expect(listing(root, "Lowfi") == ["a.m4a"])
+    }
+
+    @Test func publishMovesM4aOnlyAndNeverReplaces() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["Sad/Song.m4a", "scratch/Song.m4a", "scratch/Song.webm", "scratch/Song.webp"])
+        #expect(publish(root, scratch: "scratch", to: "Sad") == ["Song (2).m4a"])
+        #expect(listing(root, "Sad") == ["Song (2).m4a", "Song.m4a"])
+        #expect(contents(root, "Sad/Song.m4a") == "Sad/Song.m4a")
+        #expect(contents(root, "Sad/Song (2).m4a") == "scratch/Song.m4a")
+    }
+
+    @Test func publishSkipsEveryTakenNumber() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["Sad/S.m4a", "Sad/S (2).m4a", "scratch/S.m4a"])
+        #expect(publish(root, scratch: "scratch", to: "Sad") == ["S (3).m4a"])
+    }
+
+    @Test func publishRecreatesAFolderThatVanishedMidDownload() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["scratch/S.m4a"])
+        #expect(publish(root, scratch: "scratch", to: "Gone") == ["S.m4a"])
+        #expect(listing(root, "Gone") == ["S.m4a"])
+    }
+
+    @Test func publishWithoutAudioFails() throws {
+        let root = try makeTempRoot()
+        defer { removeFixture(root) }
+        try touch(root, ["scratch/S.webm"])
+        #expect(publish(root, scratch: "scratch", to: "Sad").first?.hasPrefix("error:") == true)
+        #expect(listing(root).contains("Sad") == false)
+    }
+}
+
+@Suite struct DownloadQueueTests {
+    @Test func runsAtMostMaxConcurrentAndStartsTheRestAsSlotsFree() {
+        var queue = DownloadQueue(maxConcurrent: 2)
+        queue.enqueue(urls(["a", "b", "c", "d"]), into: url("F"))
+        let first = queue.startable()
+        #expect(first.count == 2)
+        #expect(queue.startable().isEmpty)
+        queue.finish(first[0].id, outcome: .success)
+        let next = queue.startable()
+        #expect(next.count == 1)
+        #expect(next[0].url == url("c"))
+    }
+
+    @Test func skipsDuplicateActiveLinksButAllowsAfterFinishOrOtherFolder() {
+        var queue = DownloadQueue()
+        queue.enqueue(urls(["a"]), into: url("F"))
+        queue.enqueue(urls(["a"]), into: url("F"))
+        #expect(queue.jobs.count == 1)
+        queue.enqueue(urls(["a"]), into: url("G"))
+        #expect(queue.jobs.count == 2)
+        let started = queue.startable()
+        queue.finish(started[0].id, outcome: .success)
+        queue.enqueue(urls(["a"]), into: url("F"))
+        #expect(queue.jobs.count == 3)
+    }
+
+    @Test func cancellingAQueuedJobRemovesItImmediately() {
+        var queue = DownloadQueue(maxConcurrent: 1)
+        queue.enqueue(urls(["a", "b"]), into: url("F"))
+        _ = queue.startable()
+        let waiting = queue.jobs[1].id
+        let action = queue.remove(waiting)
+        #expect(action == .removed)
+        #expect(queue.jobs.count == 1)
+    }
+
+    @Test func cancellingARunningJobAsksToTerminateThenDropsItOnFailure() {
+        var queue = DownloadQueue()
+        queue.enqueue(urls(["a"]), into: url("F"))
+        let id = queue.startable()[0].id
+        let action = queue.remove(id)
+        #expect(action == .terminateProcess)
+        #expect(queue.jobs.count == 1)
+        queue.finish(id, outcome: .failure("killed"))
+        #expect(queue.jobs.isEmpty)
+    }
+
+    @Test func aJobThatSucceededJustAfterCancelIsKept() {
+        var queue = DownloadQueue()
+        queue.enqueue(urls(["a"]), into: url("F"))
+        let id = queue.startable()[0].id
+        _ = queue.remove(id)
+        queue.finish(id, outcome: .success)
+        #expect(queue.jobs.count == 1)
+        #expect(queue.jobs[0].status == .done)
+    }
+
+    @Test func failuresStayUntilDismissedAndDoneJobsClear() {
+        var queue = DownloadQueue()
+        queue.enqueue(urls(["a", "b"]), into: url("F"))
+        let started = queue.startable()
+        queue.finish(started[0].id, outcome: .failure("boom"))
+        queue.finish(started[1].id, outcome: .success)
+        queue.clearDone()
+        #expect(queue.jobs.count == 1)
+        #expect(queue.jobs[0].status == .failed("boom"))
+        let action = queue.remove(started[0].id)
+        #expect(action == .removed)
+        #expect(!queue.isDownloading)
+    }
+
+    @Test func progressAndTitleUpdateOnlyRunningJobs() {
+        var queue = DownloadQueue(maxConcurrent: 1)
+        queue.enqueue(urls(["a", "b"]), into: url("F"))
+        let running = queue.startable()[0].id
+        queue.update(running, title: "Song", progress: 0.5)
+        queue.update(running, title: "Other", progress: nil)
+        #expect(queue.jobs[0].title == "Song")
+        #expect(queue.jobs[0].status == .downloading(progress: 0.5))
+        queue.update(queue.jobs[1].id, title: nil, progress: 0.9)
+        #expect(queue.jobs[1].status == .queued)
+    }
+
+    @Test func jobsCanStartAlreadyFailed() {
+        var queue = DownloadQueue()
+        queue.enqueue(urls(["a"]), into: url("F"), failWith: "no yt-dlp")
+        #expect(queue.startable().isEmpty)
+        #expect(queue.jobs[0].status == .failed("no yt-dlp"))
+    }
+}
+
+@Suite struct SupportTests {
+    @Test func splitsOnNewlineAndCarriageReturn() {
+        #expect(splitLines([Array("a\r\nb\rc\nd".utf8)]) == ["a", "", "b", "c", "d"])
+    }
+
+    @Test func keepsAMultiByteCharacterSplitAcrossReads() {
+        let bytes = Array("[download] Destination: Café.webm\n".utf8)
+        let cut = bytes.firstIndex(of: 0xC3)! + 1  // between the two bytes of "é"
+        let lines = splitLines([Array(bytes[..<cut]), Array(bytes[cut...])])
+        #expect(lines == ["[download] Destination: Café.webm"])
+    }
+
+    @Test func emitsTheLastLineWithoutBreak() {
+        #expect(splitLines([Array("ERROR: x".utf8)]) == ["ERROR: x"])
+    }
+
+    @Test func updatedYtDlpWinsOnlyWhileNewer() {
+        #expect(choiceName(updated: 200, bundled: 100) == "updated")
+        #expect(choiceName(updated: 100, bundled: 200) == "bundled")
+        #expect(choiceName(updated: 100, bundled: nil) == "updated")
+        #expect(choiceName(updated: nil, bundled: 100) == "bundled")
+        #expect(choiceName(updated: nil, bundled: nil) == "none")
+    }
+
+    @Test func stopsSkippingWhenEveryTrackFailedInARow() {
+        var guardRail = PlaybackFailureGuard()
+        let first = guardRail.shouldSkip(afterFailureIn: 3)
+        let second = guardRail.shouldSkip(afterFailureIn: 3)
+        let third = guardRail.shouldSkip(afterFailureIn: 3)
+        #expect(first)
+        #expect(second)
+        #expect(!third)
+        guardRail.recordSuccess()
+        let again = guardRail.shouldSkip(afterFailureIn: 3)
+        #expect(again)
+    }
+
+    @Test func singleTrackFolderNeverSkips() {
+        var guardRail = PlaybackFailureGuard()
+        let skip = guardRail.shouldSkip(afterFailureIn: 1)
+        #expect(!skip)
     }
 }

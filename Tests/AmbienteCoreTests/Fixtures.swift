@@ -35,3 +35,70 @@ func sampleArguments() -> [String] {
         folder: URL(fileURLWithPath: "/m/Lowfi"),
         ffmpeg: URL(fileURLWithPath: "/app/ffmpeg"))
 }
+
+// MARK: File operation helpers (String-based so the Testing file needs no Foundation)
+
+func makeTempRoot() throws -> String {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("ambiente-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root.path
+}
+
+func touch(_ root: String, _ paths: [String]) throws {
+    for path in paths {
+        let file = URL(fileURLWithPath: root).appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(path.utf8).write(to: file)
+    }
+}
+
+/// Names (case preserved) of the items inside `root/dir`, sorted, including hidden ones.
+func listing(_ root: String, _ dir: String = "") -> [String] {
+    let url = URL(fileURLWithPath: root).appendingPathComponent(dir)
+    return ((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []).sorted()
+}
+
+func contents(_ root: String, _ path: String) -> String? {
+    try? String(contentsOf: URL(fileURLWithPath: root).appendingPathComponent(path), encoding: .utf8)
+}
+
+/// Returns the new file name, or the error description.
+func renameTrack(_ root: String, _ path: String, to name: String) -> String {
+    do {
+        return try LibraryFiles.renameTrack(URL(fileURLWithPath: root).appendingPathComponent(path), to: name).lastPathComponent
+    } catch { return "error: \(error.localizedDescription)" }
+}
+
+func renameFolder(_ root: String, _ dir: String, to name: String) -> String {
+    let base = URL(fileURLWithPath: root)
+    do {
+        return try LibraryFiles.renameFolder(base.appendingPathComponent(dir), in: base, to: name).lastPathComponent
+    } catch { return "error: \(error.localizedDescription)" }
+}
+
+/// Publishes `scratch` into `folder` (both relative to root); returns moved file names or the error.
+func publish(_ root: String, scratch: String, to folder: String) -> [String] {
+    let base = URL(fileURLWithPath: root)
+    do {
+        return try LibraryFiles.publish(from: base.appendingPathComponent(scratch), to: base.appendingPathComponent(folder))
+            .map(\.lastPathComponent)
+    } catch { return ["error: \(error.localizedDescription)"] }
+}
+
+func splitLines(_ chunks: [[UInt8]]) -> [String] {
+    var splitter = LineSplitter()
+    var lines: [String] = []
+    for chunk in chunks { lines += splitter.append(Data(chunk)) }
+    return lines + splitter.finish()
+}
+
+func choiceName(updated: Double?, bundled: Double?) -> String {
+    let result = BinaryChoice.ytDlp(
+        updatedModified: updated.map { Date(timeIntervalSince1970: $0) },
+        bundledModified: bundled.map { Date(timeIntervalSince1970: $0) })
+    switch result {
+    case .updated: return "updated"
+    case .bundled: return "bundled"
+    case nil: return "none"
+    }
+}

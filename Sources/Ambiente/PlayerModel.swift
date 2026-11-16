@@ -44,6 +44,8 @@ final class PlayerModel {
     @ObservationIgnored private var queue = PlayQueue(tracks: [], shuffled: true)
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var timeObserver: Any?
+    @ObservationIgnored private var statusObservation: NSKeyValueObservation?
+    @ObservationIgnored private var failureGuard = PlaybackFailureGuard()
     @ObservationIgnored private var metadataTask: Task<Void, Never>?
 
     private enum Keys {
@@ -190,29 +192,20 @@ final class PlayerModel {
 
     // MARK: Renaming
 
-    enum RenameError: LocalizedError {
-        case invalidName, alreadyExists, failed(String)
-        var errorDescription: String? {
-            switch self {
-            case .invalidName: "That name isn't valid."
-            case .alreadyExists: "Something with that name already exists."
-            case .failed(let message): message
-            }
-        }
+    /// Creates an ambiente folder (no-op if it exists) and refreshes the list.
+    @discardableResult
+    func createFolder(_ folder: AmbienteFolder) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        } catch { return false }
+        refreshFolders()
+        return true
     }
 
     /// Renames a track's file (the extension is kept). Playback continues if it is the current track.
     func renameTrack(_ url: URL, to input: String) throws {
-        guard var name = AudioLibrary.sanitizedFolderName(input) else { throw RenameError.invalidName }
-        let ext = url.pathExtension
-        if name.lowercased().hasSuffix("." + ext.lowercased()) { name = String(name.dropLast(ext.count + 1)) }
-        guard !name.isEmpty else { throw RenameError.invalidName }
-        let target = url.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension(ext)
+        let target = try LibraryFiles.renameTrack(url, to: input)
         guard target != url else { return }
-        guard !FileManager.default.fileExists(atPath: target.path) else { throw RenameError.alreadyExists }
-        do { try FileManager.default.moveItem(at: url, to: target) } catch {
-            throw RenameError.failed(error.localizedDescription)
-        }
         let wasCurrent = queue.current == url
         queue.rename(from: url, to: target)
         if wasCurrent { reattach(to: target) }
@@ -221,23 +214,8 @@ final class PlayerModel {
 
     /// Renames an ambiente folder. If it is the active one, playback continues on the same track.
     func renameFolder(_ folder: AmbienteFolder, to input: String) throws {
-        guard let name = AudioLibrary.sanitizedFolderName(input) else { throw RenameError.invalidName }
-        let target = root.appendingPathComponent(name, isDirectory: true)
+        let target = try LibraryFiles.renameFolder(folder.url, in: root, to: input)
         guard target != folder.url else { return }
-        let caseOnly = name.lowercased() == folder.name.lowercased()
-        let fm = FileManager.default
-        guard caseOnly || !fm.fileExists(atPath: target.path) else { throw RenameError.alreadyExists }
-        do {
-            if caseOnly {
-                let temp = root.appendingPathComponent(".rename-\(UUID().uuidString)", isDirectory: true)
-                try fm.moveItem(at: folder.url, to: temp)
-                try fm.moveItem(at: temp, to: target)
-            } else {
-                try fm.moveItem(at: folder.url, to: target)
-            }
-        } catch {
-            throw RenameError.failed(error.localizedDescription)
-        }
         if activeFolder == folder {
             let currentName = queue.current?.lastPathComponent
             let renamed = AmbienteFolder(url: target)
@@ -255,7 +233,7 @@ final class PlayerModel {
 
     /// Re-points the player at a renamed file, keeping position and play state.
     private func reattach(to url: URL) {
-        let time = currentTime
+        let time = player.currentTime().seconds.isFinite ? player.currentTime().seconds : currentTime
         let wasPlaying = isPlaying
         load(url)
         player.seek(to: CMTime(seconds: time, preferredTimescale: 600))
@@ -268,7 +246,7 @@ final class PlayerModel {
     /// Moves a track or a whole ambiente folder to the Trash (recoverable from Finder).
     func moveToTrash(_ url: URL) throws {
         do { try FileManager.default.trashItem(at: url, resultingItemURL: nil) } catch {
-            throw RenameError.failed(error.localizedDescription)
+            throw LibraryFileError.failed(error.localizedDescription)
         }
         refreshFolders()
     }
@@ -299,6 +277,8 @@ final class PlayerModel {
         case .one:
             player.seek(to: .zero)
             player.play()
+            currentTime = 0
+            updateNowPlaying()
         case .all:
             next()
         case .off:
@@ -328,6 +308,8 @@ final class PlayerModel {
         activeFolder = nil
         queue = PlayQueue(tracks: [], shuffled: true)
         trackCount = 0
+        currentTime = 0
+        duration = 0
         isPlaying = false
         trackTitle = nil
         trackArtist = nil
@@ -343,6 +325,19 @@ final class PlayerModel {
         player.play()
         isPlaying = true
         updateNowPlaying()
+    }
+
+    /// An unplayable file (corrupt, or deleted behind our back) must not leave the UI on "playing"
+    /// in silence: skip to the next track, unless every track in a row has already failed.
+    private func currentItemFailed() {
+        guard isPlaying else { return }
+        if failureGuard.shouldSkip(afterFailureIn: queue.count) {
+            next()
+        } else {
+            player.pause()
+            isPlaying = false
+            updateNowPlaying()
+        }
     }
 
     private func prepareCurrent() {
@@ -361,6 +356,8 @@ final class PlayerModel {
             trackTitle = nil
             trackArtist = nil
             artwork = nil
+            currentTime = 0
+            duration = 0
             return false
         }
         currentTime = 0
@@ -372,6 +369,14 @@ final class PlayerModel {
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.trackEnded() }
+        }
+        statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            let status = item.status
+            Task { @MainActor in
+                guard let self, self.player.currentItem === item else { return }
+                if status == .readyToPlay { self.failureGuard.recordSuccess() }
+                if status == .failed { self.currentItemFailed() }
+            }
         }
         player.replaceCurrentItem(with: item)
         // The file name is the title, so renaming a file changes what is shown.
@@ -406,7 +411,6 @@ final class PlayerModel {
 
     /// Built outside the main actor: MediaPlayer calls the artwork handler on its own queue.
     private nonisolated static func nowPlayingArtwork(_ image: NSImage) -> MPMediaItemArtwork {
-        nonisolated(unsafe) let image = image
         return MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
 

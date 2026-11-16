@@ -6,39 +6,16 @@ import Observation
 @MainActor
 @Observable
 final class DownloadModel {
-    struct Job: Identifiable, Equatable {
-        enum Status: Equatable {
-            case queued
-            case downloading(progress: Double?)
-            case done
-            case failed(String)
-        }
-
-        let id = UUID()
-        let url: URL
-        let folder: URL
-        var title: String?
-        var status: Status = .queued
-
-        var displayName: String { title ?? url.absoluteString }
-        var isActive: Bool {
-            switch status {
-            case .queued, .downloading: true
-            case .done, .failed: false
-            }
-        }
-    }
-
     enum UpdateState: Equatable {
         case idle
         case updating
         case failed(String)
     }
 
-    private(set) var jobs: [Job] = []
+    private var queue = DownloadQueue(maxConcurrent: 3)
+    var jobs: [DownloadJob] { queue.jobs }
     /// Called on the main actor each time a track lands in the library.
     @ObservationIgnored var onTrackAdded: (() -> Void)?
-    static let maxConcurrent = 3
     private(set) var updateState: UpdateState = .idle
     private(set) var installedVersion: String?
     private(set) var latestVersion: String?
@@ -58,16 +35,14 @@ final class DownloadModel {
     }
 
     var isBusy: Bool { updateState == .updating }
-    var isDownloading: Bool { jobs.contains { $0.isActive } }
+    var isDownloading: Bool { queue.isDownloading }
 
     @ObservationIgnored private var processes: [UUID: Process] = [:]
-    @ObservationIgnored private var cancelled: Set<UUID> = []
 
     private static var scratchRoot: URL { Binaries.supportDirectory.appendingPathComponent("downloads", isDirectory: true) }
 
     init() {
-        // No download can be running at launch, so anything here is debris from an interrupted one.
-        try? FileManager.default.removeItem(at: Self.scratchRoot)
+        Self.removeStaleScratch()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -75,74 +50,45 @@ final class DownloadModel {
         }
     }
 
-    /// Moves finished m4a files from `scratch` into `folder`, never overwriting existing tracks.
-    private nonisolated static func publish(from scratch: URL, to folder: URL) -> Bool {
+    /// No download can be running at launch, so scratch folders are debris from an interrupted one.
+    /// One that still holds a finished m4a (a save that failed) is kept so the file is not lost.
+    private static func removeStaleScratch() {
         let fm = FileManager.default
-        let files = ((try? fm.contentsOfDirectory(at: scratch, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension.lowercased() == "m4a" }
-        guard !files.isEmpty else { return false }
-        for file in files {
-            var target = folder.appendingPathComponent(file.lastPathComponent)
-            var n = 2
-            while fm.fileExists(atPath: target.path) {
-                let base = file.deletingPathExtension().lastPathComponent
-                target = folder.appendingPathComponent("\(base) (\(n)).m4a")
-                n += 1
-            }
-            guard (try? fm.moveItem(at: file, to: target)) != nil else { return false }
+        let dirs = (try? fm.contentsOfDirectory(at: scratchRoot, includingPropertiesForKeys: nil)) ?? []
+        for dir in dirs {
+            let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            if !files.contains(where: { $0.pathExtension.lowercased() == "m4a" }) { try? fm.removeItem(at: dir) }
         }
-        return true
     }
 
     // MARK: Jobs
 
-    /// Queues one download per link into `folder`; up to `maxConcurrent` run at once.
+    /// Queues one download per link into `folder`; up to three run at once.
     func enqueue(_ urls: [URL], into folder: URL) {
-        for url in urls {
-            if jobs.contains(where: { $0.isActive && $0.url == url && $0.folder == folder }) { continue }
-            var job = Job(url: url, folder: folder)
-            if Binaries.ytDlp == nil {
-                job.status = .failed("yt-dlp not found in the app. Run scripts/fetch-binaries.sh and rebuild the app.")
-            }
-            jobs.append(job)
-        }
+        let message = Binaries.ytDlp == nil
+            ? "yt-dlp not found in the app. Run scripts/fetch-binaries.sh and rebuild the app." : nil
+        queue.enqueue(urls, into: folder, failWith: message)
         pump()
     }
 
     /// Cancels an active job or dismisses a finished one.
     func remove(_ id: UUID) {
-        if let process = processes[id] {
-            cancelled.insert(id)
-            process.terminate()
-        } else {
-            jobs.removeAll { $0.id == id }
-        }
+        if queue.remove(id) == .terminateProcess { processes[id]?.terminate() }
     }
 
-    func clearDone() {
-        jobs.removeAll { $0.status == .done }
-    }
-
-    private func update(_ id: UUID, _ change: (inout Job) -> Void) {
-        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
-        change(&jobs[index])
-    }
+    func clearDone() { queue.clearDone() }
 
     private func pump() {
-        while processes.count < Self.maxConcurrent,
-              let next = jobs.first(where: { $0.status == .queued && processes[$0.id] == nil }) {
-            start(next)
-        }
+        for job in queue.startable() { start(job) }
     }
 
-    private func start(_ job: Job) {
+    private func start(_ job: DownloadJob) {
         guard let ytDlp = Binaries.ytDlp else {
-            update(job.id) { $0.status = .failed("yt-dlp not found in the app.") }
+            queue.finish(job.id, outcome: .failure("yt-dlp not found in the app."))
             return
         }
         let id = job.id
         let folder = job.folder
-        update(id) { $0.status = .downloading(progress: nil) }
 
         // Work in a scratch folder and publish only a finished file, so an interrupted
         // download never leaves a truncated track (or its .webm/.webp leftovers) in the library.
@@ -160,12 +106,7 @@ final class DownloadModel {
             let progress = YouTubeDownload.progress(fromLine: line)
             let title = YouTubeDownload.title(fromLine: line)
             guard progress != nil || title != nil else { return }
-            Task { @MainActor in
-                self?.update(id) { job in
-                    if let title, job.title == nil { job.title = title }
-                    if let progress, case .downloading = job.status { job.status = .downloading(progress: progress) }
-                }
-            }
+            Task { @MainActor in self?.queue.update(id, title: title, progress: progress) }
         }
         pipe.fileHandleForReading.readabilityHandler = { handle in
             collector.append(handle.availableData)
@@ -173,23 +114,31 @@ final class DownloadModel {
         proc.terminationHandler = { [weak self] finished in
             pipe.fileHandleForReading.readabilityHandler = nil
             collector.append(pipe.fileHandleForReading.readDataToEndOfFile())
+            collector.finish()
             let output = collector.text
             let status = finished.terminationStatus
-            let published = status == 0 && Self.publish(from: scratch, to: folder)
-            try? FileManager.default.removeItem(at: scratch)
+            var outcome = DownloadQueue.Outcome.success
+            if status != 0 {
+                outcome = .failure(YouTubeDownload.errorMessage(fromOutput: output))
+                try? FileManager.default.removeItem(at: scratch)
+            } else {
+                do {
+                    _ = try LibraryFiles.publish(from: scratch, to: folder)
+                    try? FileManager.default.removeItem(at: scratch)
+                } catch {
+                    // Keep the scratch folder: the finished file must not be lost.
+                    let detail = (error as? LibraryFileError) == .nothingProduced
+                        ? error.localizedDescription
+                        : "\(error.localizedDescription) The file was kept in \(scratch.path)."
+                    outcome = .failure(detail)
+                    if (error as? LibraryFileError) == .nothingProduced { try? FileManager.default.removeItem(at: scratch) }
+                }
+            }
             Task { @MainActor in
                 guard let self else { return }
                 self.processes[id] = nil
-                if self.cancelled.remove(id) != nil {
-                    self.jobs.removeAll { $0.id == id }
-                } else if status == 0, !published {
-                    self.update(id) { $0.status = .failed("The download finished but no audio file was produced.") }
-                } else if status == 0 {
-                    self.update(id) { $0.status = .done }
-                    self.onTrackAdded?()
-                } else {
-                    self.update(id) { $0.status = .failed(YouTubeDownload.errorMessage(fromOutput: output)) }
-                }
+                self.queue.finish(id, outcome: outcome)
+                if outcome == .success { self.onTrackAdded?() }
                 self.pump()
             }
         }
@@ -199,7 +148,7 @@ final class DownloadModel {
         } catch {
             pipe.fileHandleForReading.readabilityHandler = nil
             try? FileManager.default.removeItem(at: scratch)
-            update(id) { $0.status = .failed("Could not run yt-dlp: \(error.localizedDescription)") }
+            queue.finish(id, outcome: .failure("Could not run yt-dlp: \(error.localizedDescription)"))
         }
     }
 
@@ -210,12 +159,14 @@ final class DownloadModel {
     func checkForUpdate(force: Bool = false) {
         if !force, let lastCheck, Date().timeIntervalSince(lastCheck) < 6 * 3600 { return }
         guard let ytDlp = Binaries.ytDlp else { return }
-        lastCheck = Date()
         Task {
             let installed = await Task.detached { try? Self.run(ytDlp, ["--version"]) }.value
             let latest = await Task.detached { try? await Self.fetchLatestVersion() }.value
             if let installed { installedVersion = installed }
-            if let latest { latestVersion = latest }
+            if let latest {
+                latestVersion = latest
+                lastCheck = Date()  // a failed check (offline, rate limit) must not silence the next ones
+            }
         }
     }
 
@@ -237,7 +188,8 @@ final class DownloadModel {
 
     private nonisolated static func fetchLatestVersion() async throws -> String {
         let url = URL(string: "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")!
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw UpdateError("GitHub did not respond as expected.") }
         struct Release: Decodable { let tag_name: String }
         return try JSONDecoder().decode(Release.self, from: data).tag_name
     }
@@ -283,10 +235,10 @@ private struct UpdateError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-/// Thread-safe accumulator that emits complete lines (yt-dlp separates progress with \n or \r).
+/// Thread-safe accumulator that hands complete lines to `onLine` and keeps the whole text.
 private final class OutputCollector: @unchecked Sendable {
     private let lock = NSLock()
-    private var buffer = ""
+    private var splitter = LineSplitter()
     private var all = ""
     private let onLine: @Sendable (String) -> Void
 
@@ -296,14 +248,19 @@ private final class OutputCollector: @unchecked Sendable {
 
     func append(_ data: Data) {
         guard !data.isEmpty else { return }
-        let chunk = String(decoding: data, as: UTF8.self)
-        var lines: [String] = []
-        lock.withLock {
-            all += chunk
-            buffer += chunk
-            let parts = buffer.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r" })
-            buffer = String(parts.last ?? "")
-            lines = parts.dropLast().map(String.init)
+        let lines = lock.withLock {
+            let lines = splitter.append(data)
+            all += lines.map { $0 + "\n" }.joined()
+            return lines
+        }
+        lines.forEach(onLine)
+    }
+
+    func finish() {
+        let lines = lock.withLock {
+            let lines = splitter.finish()
+            all += lines.joined(separator: "\n")
+            return lines
         }
         lines.forEach(onLine)
     }

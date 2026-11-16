@@ -1,3 +1,4 @@
+import AmbienteCore
 import Foundation
 
 /// Where the external tools live. yt-dlp can be replaced at runtime by a copy in
@@ -12,11 +13,19 @@ enum Binaries {
     static var bundledYtDlp: URL? { Bundle.main.resourceURL?.appendingPathComponent("yt-dlp") }
     static var ffmpeg: URL? { Bundle.main.resourceURL?.appendingPathComponent("ffmpeg") }
 
-    /// Updated copy first, bundled copy as the fallback.
+    /// The updated copy while it is newer than the bundled one, otherwise the bundled one.
     static var ytDlp: URL? {
         let fm = FileManager.default
-        if fm.isExecutableFile(atPath: updatedYtDlp.path) { return updatedYtDlp }
-        if let bundled = bundledYtDlp, fm.isExecutableFile(atPath: bundled.path) { return bundled }
-        return nil
+        func usable(_ url: URL?) -> (url: URL, modified: Date?)? {
+            guard let url, fm.isExecutableFile(atPath: url.path) else { return nil }
+            return (url, (try? fm.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date)
+        }
+        let updated = usable(updatedYtDlp)
+        let bundled = usable(bundledYtDlp)
+        switch BinaryChoice.ytDlp(updatedModified: updated?.modified, bundledModified: bundled?.modified) {
+        case .updated: return updated?.url
+        case .bundled: return bundled?.url
+        case nil: return updated?.url ?? bundled?.url
+        }
     }
 }

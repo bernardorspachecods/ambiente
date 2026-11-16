@@ -35,7 +35,7 @@ wrapper do YouTube: o YouTube só serve de fonte para descarregar áudio.
   visível é um ambiente; cada ficheiro de áudio dentro dela é uma faixa. Não
   há configuração nem base de dados: as pastas são a verdade.
 - Subpastas dentro de um ambiente não contam (um nível só).
-- Formatos reconhecidos: m4a, mp3, aac, wav, aiff, flac, caf. Opus não toca em
+- Formatos reconhecidos: m4a, mp3, aac, wav, aiff/aif, flac, caf. Opus não toca em
   AVPlayer e por isso os downloads são sempre m4a.
 - A lista é relida ao abrir o menu e depois de qualquer alteração feita pela app.
 - O **título mostrado é o nome do ficheiro**, não o título dos metadados, para
@@ -57,6 +57,9 @@ wrapper do YouTube: o YouTube só serve de fonte para descarregar áudio.
 - **Retoma:** ao abrir, a app volta ao último ambiente, volume, faixa e
   posição, **em pausa** (não toca sozinha). Se a faixa guardada já não existir,
   fica só o ambiente.
+- Um ficheiro ilegível (corrompido, ou apagado por fora) é saltado para a
+  faixa seguinte; se todas as faixas falharem seguidas, a reprodução pára em
+  vez de ficar em silêncio com o botão em "play".
 - Adicionar ficheiros à pasta do ambiente ativo não interrompe a faixa atual;
   as novas faixas entram na ronda.
 
@@ -69,11 +72,16 @@ wrapper do YouTube: o YouTube só serve de fonte para descarregar áudio.
 - Descarregam até 3 em paralelo; os restantes esperam. Cada link tem o seu
   progresso, estado, e pode ser cancelado.
 - Uma faixa só entra no ambiente quando o descarregamento termina com sucesso;
-  uma interrupção nunca deixa ficheiros parciais na biblioteca. Se já existir
-  uma faixa com o nome, a nova fica com " (2)".
+  uma interrupção nunca deixa ficheiros parciais na biblioteca. Uma faixa
+  existente nunca é substituída: se o nome estiver ocupado, a nova fica com
+  " (2)", " (3)"... Se o ambiente desaparecer durante o descarregamento, é
+  recriado. Se guardar falhar, o ficheiro descarregado fica na pasta de
+  trabalho e o erro indica onde.
 - O `yt-dlp` e o `ffmpeg` vão dentro da app. O `yt-dlp` pode ser atualizado
   sem reinstalar: a app avisa **só** quando há versão nova, e a atualização
-  só substitui a versão em uso se a nova arrancar.
+  só substitui a versão em uso se a nova arrancar. A cópia atualizada só é
+  usada enquanto for mais recente que a do bundle. O `yt-dlp` corre sem a
+  configuração pessoal do utilizador.
 - Nota legal: descarregar do YouTube vai contra os termos do serviço. Uso
   pessoal por decisão do utilizador.
 
@@ -81,7 +89,9 @@ wrapper do YouTube: o YouTube só serve de fonte para descarregar áudio.
 
 - **Renomear** faixas e ambientes na própria lista (menu de contexto). Nas
   faixas a extensão mantém-se; nomes que colidem com um existente são
-  recusados. Renomear o que está a tocar não interrompe a reprodução.
+  recusados, e mudar só maiúsculas/minúsculas é permitido. Renomear o que está a
+  tocar continua a reprodução na mesma posição, com um corte breve (a faixa é
+  recarregada).
 - **Apagar** move para o Lixo (recuperável), com confirmação. Apagar o
   ambiente leva todas as faixas. Apagar a faixa a tocar passa a outra; apagar o
   ambiente a tocar pára a reprodução.

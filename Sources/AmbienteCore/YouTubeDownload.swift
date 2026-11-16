@@ -36,6 +36,8 @@ public enum YouTubeDownload {
     /// `--` ends option parsing so a link can never be read as a flag.
     public static func arguments(url: URL, folder: URL, ffmpeg: URL?) -> [String] {
         var args = [
+            // A user-level yt-dlp config (--exec, --download-archive...) must not change what the app does.
+            "--ignore-config",
             "--no-playlist",
             "--newline",
             "--no-colors",

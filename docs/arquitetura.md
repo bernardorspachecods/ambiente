@@ -21,18 +21,23 @@ tags: [arquitetura, tecnico]
 
 Swift Package com dois alvos, mais testes:
 
-- `Sources/AmbienteCore/` — lógica pura, sem AppKit nem processos: ler a
-  biblioteca, ordem de reprodução (shuffle/repeat), argumentos e leitura da
-  saída do `yt-dlp`, validação de nomes. **Tudo o que for lógica nova e
-  testável vai aqui, com testes.**
+- `Sources/AmbienteCore/` — lógica sem AppKit nem processos: ler a
+  biblioteca, ordem de reprodução (shuffle/repeat), operações de ficheiros
+  (renomear, publicar descarregamentos), a fila de descarregamentos, argumentos
+  e leitura da saída do `yt-dlp`, escolha do binário, proteção contra faixas
+  ilegíveis em cadeia. **Tudo o que for lógica nova e testável vai aqui, com
+  testes** (política em [AGENTS.md](/AGENTS.md)).
 - `Sources/Ambiente/` — a app: reprodução (`PlayerModel`), descarregamentos e
   atualizador (`DownloadModel`), localização dos binários, o popover SwiftUI
-  (`MenuView`) e o ícone. Não tem testes automáticos: verifica-se à mão
+  (`MenuView`) e o ícone. É cola fina sobre o núcleo: o que não tem teste
+  automático é o que exige a app a correr (AVPlayer, Now Playing, teclas
+  multimédia, processos reais, aparência) e verifica-se à mão
   ([desenvolvimento](/docs/desenvolvimento.md#verificação-manual)).
 - `Tests/AmbienteCoreTests/` — só testa o núcleo.
 
 Os dois modelos da app são `@MainActor @Observable`; a vista só lê o estado e
-chama métodos, não tem lógica de reprodução nem de ficheiros.
+chama métodos, não tem lógica de reprodução nem de ficheiros (criar pastas,
+renomear e apagar passam pelo `PlayerModel`).
 
 ## Onde pôr uma feature
 
@@ -59,8 +64,10 @@ critérios) e, se mudou estrutura ou estado guardado, este documento.
 
 ## Binários externos
 
-O `yt-dlp` procura-se primeiro em Application Support (versão atualizada) e
-depois no bundle; o `ffmpeg` é sempre o do bundle. Ambos vêm de
+O `yt-dlp` atualizado em Application Support só ganha ao do bundle enquanto for
+mais recente (data do ficheiro); assim recompilar a app com um `yt-dlp` mais
+novo nunca fica à sombra de uma atualização antiga. O `ffmpeg` é sempre o do
+bundle. Ambos vêm de
 `scripts/fetch-binaries.sh` para `vendor/` (não versionado) e são copiados para o
 bundle por `scripts/build-app.sh`. O `ffmpeg` tem de ser **estático**: o do
 Homebrew depende de bibliotecas fora do sistema e partia fora desta máquina. O
@@ -71,9 +78,12 @@ Homebrew depende de bibliotecas fora do sistema e partia fora desta máquina. O
 Cada link é um trabalho com a sua pasta temporária. O `yt-dlp` escreve lá, e
 só no fim com sucesso o `.m4a` é movido para o ambiente. Isto existe porque uma
 interrupção a meio já deixou um `.m4a` truncado e restos `.webm`/`.webp` na
-biblioteca. Há no máximo 3 processos em simultâneo; os restantes esperam.
-Fechar a app termina os processos, e os restos de trabalhos interrompidos são
-apagados no arranque.
+biblioteca. O estado da fila (no máximo 3 em simultâneo, cancelar, duplicados)
+vive em `DownloadQueue`; o `DownloadModel` só lança e termina os processos e
+reporta o resultado. A escolha do nome livre é feita pelo próprio movimento do
+ficheiro, para dois descarregamentos com o mesmo título não colidirem. Fechar a
+app termina os processos; no arranque apagam-se as pastas de trabalho
+interrompidas, exceto as que ainda guardam um `.m4a` cujo registo falhou.
 
 ## Decisões e armadilhas
 
@@ -88,6 +98,5 @@ apagados no arranque.
   navegação por teclado do macOS ligada, o primeiro botão abria sempre com
   contorno. Consequência aceite: o popover não se navega só com Tab.
 - **Imagem do Now Playing** criada fora do ator principal: o MediaPlayer chama
-  o handler noutra fila e o isolamento do Swift 6 faria a app falhar.
-- **Aviso de compilação conhecido** sobre isso mesmo em `PlayerModel`; é o
-  ponto sensível a regressões ao mexer no Now Playing.
+  o handler noutra fila e uma closure isolada ao ator principal falharia em
+  execução.
