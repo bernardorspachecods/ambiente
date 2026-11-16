@@ -38,7 +38,11 @@ struct MenuView: View {
             if targetName != Self.newTag, !player.folders.contains(where: { $0.name == targetName }) {
                 targetName = player.activeFolder?.name ?? player.folders.first?.name ?? Self.newTag
             }
+            if let active = player.activeFolder { expanded.insert(active.id) }
             downloads.checkForUpdate()
+        }
+        .onChange(of: player.activeFolder) { _, active in
+            if let active { expanded.insert(active.id) }
         }
     }
 
@@ -213,8 +217,6 @@ struct MenuView: View {
                         player.select(folder)
                     } label: {
                         HStack {
-                            Image(systemName: "checkmark")
-                                .opacity(folder == player.activeFolder ? 1 : 0)
                             Text(folder.name)
                             Spacer()
                         }
@@ -295,8 +297,22 @@ struct MenuView: View {
     // MARK: Add by link
 
     private var addByLink: some View {
-        DisclosureGroup("Add by link", isExpanded: $showAddByLink) {
-            addByLinkContent.padding(.top, 6)
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                showAddByLink.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .rotationEffect(.degrees(showAddByLink ? 90 : 0))
+                        .frame(width: 12)
+                    Text("Add by link")
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if showAddByLink { addByLinkContent }
         }
     }
 
