@@ -13,6 +13,7 @@ struct MenuView: View {
     @State private var renaming: URL?
     @State private var renameText = ""
     @State private var renameError: String?
+    @State private var pendingDelete: URL?
     @State private var link = ""
     @State private var targetName = ""
     @State private var newName = ""
@@ -30,6 +31,7 @@ struct MenuView: View {
         }
         .padding(12)
         .frame(width: 300)
+        .focusEffectDisabled()
         .onAppear {
             showSettings = false
             renaming = nil
@@ -179,6 +181,7 @@ struct MenuView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+            deleteConfirmation
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(player.folders) { folder in
@@ -214,7 +217,7 @@ struct MenuView: View {
             } else {
                 HStack {
                     Button {
-                        player.select(folder)
+                        toggleExpanded(folder)
                     } label: {
                         HStack {
                             Text(folder.name)
@@ -223,6 +226,14 @@ struct MenuView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    Button {
+                        player.select(folder)
+                    } label: {
+                        Image(systemName: "play.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Play \(folder.name)")
                     Button {
                         NSWorkspace.shared.open(folder.url)
                     } label: {
@@ -235,6 +246,8 @@ struct MenuView: View {
                 .contextMenu {
                     Button("Rename…") { beginRename(folder.url, text: folder.name) }
                     Button("Show in Finder") { NSWorkspace.shared.open(folder.url) }
+                    Divider()
+                    Button("Move to Trash…", role: .destructive) { pendingDelete = folder.url }
                 }
             }
         }
@@ -267,8 +280,39 @@ struct MenuView: View {
                 .contextMenu {
                     Button("Rename…") { beginRename(track, text: name) }
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([track]) }
+                    Divider()
+                    Button("Move to Trash…", role: .destructive) { pendingDelete = track }
                 }
             }
+        }
+    }
+
+    private func toggleExpanded(_ folder: AmbienteFolder) {
+        if expanded.contains(folder.id) { expanded.remove(folder.id) } else { expanded.insert(folder.id) }
+    }
+
+    @ViewBuilder private var deleteConfirmation: some View {
+        if let url = pendingDelete {
+            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            let name = isFolder ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
+            VStack(alignment: .leading, spacing: 6) {
+                Text(isFolder ? "Move “\(name)” and all its tracks to the Trash?" : "Move “\(name)” to the Trash?")
+                    .font(.callout)
+                HStack {
+                    Button("Cancel") { pendingDelete = nil }
+                    Button("Move to Trash", role: .destructive) {
+                        do {
+                            try player.moveToTrash(url)
+                            renameError = nil
+                        } catch {
+                            renameError = error.localizedDescription
+                        }
+                        pendingDelete = nil
+                    }
+                }
+            }
+            .padding(8)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
         }
     }
 
@@ -282,6 +326,7 @@ struct MenuView: View {
     private func renameField(commit: @escaping (String) throws -> Void) -> some View {
         TextField("Name", text: $renameText)
             .textFieldStyle(.roundedBorder)
+            .focusEffectDisabled(false)
             .onSubmit {
                 do {
                     try commit(renameText)
@@ -320,6 +365,7 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 6) {
             TextField("Paste a YouTube link", text: $link)
                 .textFieldStyle(.roundedBorder)
+            .focusEffectDisabled(false)
                 .onSubmit(startDownload)
             HStack {
                 Picker("Ambiente", selection: $targetName) {
@@ -338,6 +384,7 @@ struct MenuView: View {
             if targetName == Self.newTag {
                 TextField("New ambiente name", text: $newName)
                     .textFieldStyle(.roundedBorder)
+            .focusEffectDisabled(false)
                     .onSubmit(startDownload)
             }
             downloadStatus
@@ -405,22 +452,47 @@ struct MenuView: View {
                     .buttonStyle(.borderless)
                 Text("Settings").font(.headline)
             }
-            Toggle("Open at login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
-            if let loginError {
-                Text(loginError).font(.caption).foregroundStyle(.red)
+            settingsSection("General") {
+                Toggle("Open at login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
+                if let loginError {
+                    Text(loginError).font(.caption).foregroundStyle(.red)
+                }
             }
-            Divider()
-            HStack {
-                Text("yt-dlp")
-                Spacer()
-                Text(downloads.installedVersion ?? "—").foregroundStyle(.secondary)
+            settingsSection("Library") {
+                Text(Self.display(player.root))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Button("Open in Finder") { NSWorkspace.shared.open(player.root) }
             }
-            Button("Check for yt-dlp update") {
-                downloads.checkForUpdate(force: true)
+            settingsSection("Downloads") {
+                HStack {
+                    Text("yt-dlp")
+                    Spacer()
+                    Text(downloads.installedVersion ?? "—").foregroundStyle(.secondary)
+                }
+                Button("Check for update") { downloads.checkForUpdate(force: true) }
+                    .disabled(downloads.isBusy)
+                if downloads.updateAvailable, let latest = downloads.latestVersion {
+                    HStack {
+                        Text("Version \(latest) available").font(.callout)
+                        Spacer()
+                        Button("Update", action: downloads.updateYtDlp)
+                            .disabled(downloads.isBusy)
+                    }
+                }
             }
-            .disabled(downloads.isBusy)
-            Button("Open library folder") { NSWorkspace.shared.open(player.root) }
+        }
+    }
+
+    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8, content: content)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
         }
     }
 

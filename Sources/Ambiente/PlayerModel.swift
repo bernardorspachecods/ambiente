@@ -229,6 +229,14 @@ final class PlayerModel {
         updateNowPlaying()
     }
 
+    /// Moves a track or a whole ambiente folder to the Trash (recoverable from Finder).
+    func moveToTrash(_ url: URL) throws {
+        do { try FileManager.default.trashItem(at: url, resultingItemURL: nil) } catch {
+            throw RenameError.failed(error.localizedDescription)
+        }
+        refreshFolders()
+    }
+
     func togglePlayPause() {
         if isPlaying {
             player.pause()
