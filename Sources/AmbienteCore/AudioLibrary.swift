@@ -42,4 +42,15 @@ public enum AudioLibrary {
             .filter { audioExtensions.contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
+
+    /// A safe folder name from user input: trimmed, no path separators or leading dots.
+    /// Returns nil when nothing usable is left.
+    public static func sanitizedFolderName(_ input: String) -> String? {
+        let cleaned = input
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = String(cleaned.drop(while: { $0 == "." })).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
+    }
 }

@@ -8,6 +8,8 @@ struct MenuView: View {
 
     @State private var link = ""
     @State private var targetName = ""
+    @State private var newName = ""
+    private static let newTag = "\u{0}new"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
 
@@ -35,8 +37,8 @@ struct MenuView: View {
         .frame(width: 300)
         .onAppear {
             player.refreshFolders()
-            if targetName.isEmpty || !player.folders.contains(where: { $0.name == targetName }) {
-                targetName = player.activeFolder?.name ?? player.folders.first?.name ?? ""
+            if targetName != Self.newTag, !player.folders.contains(where: { $0.name == targetName }) {
+                targetName = player.activeFolder?.name ?? player.folders.first?.name ?? Self.newTag
             }
         }
     }
@@ -104,14 +106,21 @@ struct MenuView: View {
             HStack {
                 Picker("Ambiente", selection: $targetName) {
                     ForEach(player.folders) { Text($0.name).tag($0.name) }
+                    if !player.folders.isEmpty { Divider() }
+                    Text("Novo ambiente…").tag(Self.newTag)
                 }
                 .labelsHidden()
                 if case .downloading = downloads.state {
                     Button("Cancelar", action: downloads.cancel)
                 } else {
                     Button("Descarregar", action: startDownload)
-                        .disabled(link.isEmpty || targetName.isEmpty || downloads.isBusy)
+                        .disabled(link.isEmpty || resolvedTarget() == nil || downloads.isBusy)
                 }
+            }
+            if targetName == Self.newTag {
+                TextField("Nome do novo ambiente", text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(startDownload)
             }
             downloadStatus
         }
@@ -165,11 +174,28 @@ struct MenuView: View {
         }
     }
 
+    /// The chosen folder, or the one that would be created for a new name.
+    private func resolvedTarget() -> AmbienteFolder? {
+        if targetName == Self.newTag {
+            guard let name = AudioLibrary.sanitizedFolderName(newName) else { return nil }
+            return AmbienteFolder(url: player.root.appendingPathComponent(name, isDirectory: true))
+        }
+        return player.folders.first { $0.name == targetName }
+    }
+
     private func startDownload() {
-        guard let folder = player.folders.first(where: { $0.name == targetName }), !link.isEmpty else { return }
+        guard let folder = resolvedTarget(), !link.isEmpty else { return }
+        let isNew = targetName == Self.newTag
+        if isNew {
+            try? FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        }
         downloads.download(link: link, into: folder) {
             link = ""
             player.refreshFolders()
+            if isNew {
+                newName = ""
+                targetName = folder.name
+            }
         }
     }
 

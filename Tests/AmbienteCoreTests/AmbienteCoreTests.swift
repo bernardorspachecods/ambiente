@@ -69,6 +69,15 @@ import Testing
         #expect(trackNames(root: root, folder: "Lowfi") == ["one.m4a", "TWO.MP3"])
     }
 
+    @Test func sanitizesFolderNames() {
+        #expect(AudioLibrary.sanitizedFolderName("  Lowfi ") == "Lowfi")
+        #expect(AudioLibrary.sanitizedFolderName("a/b:c") == "a-b-c")
+        #expect(AudioLibrary.sanitizedFolderName("..hidden") == "hidden")
+        #expect(AudioLibrary.sanitizedFolderName(" ../ ") == "-")
+        #expect(AudioLibrary.sanitizedFolderName("   ") == nil)
+        #expect(AudioLibrary.sanitizedFolderName("...") == nil)
+    }
+
     @Test func missingRootIsEmpty() {
         #expect(folderNames(root: "/nonexistent/ambiente").isEmpty)
     }
