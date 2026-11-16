@@ -20,16 +20,19 @@ No full Xcode: everything uses the Command Line Tools and Swift Package Manager.
 
 ```sh
 scripts/fetch-binaries.sh        # once: yt-dlp and a static ffmpeg into vendor/
-scripts/build-app.sh             # build/Ambiente.app, ad-hoc signed
-scripts/build-app.sh --install   # also copies it to ~/Applications
+scripts/build-app.sh   # build/Ambiente.app (the local build), ad-hoc signed
 open build/Ambiente.app
+scripts/install.sh     # build, quit the running copies, replace /Applications/Ambiente.app, open it
 ```
 
 `vendor/` and `build/` are not versioned. The app icon (`Resources/AppIcon.icns`)
-is generated from the blob with `scripts/make-icon.sh`. To see a change you must
-quit the app and open it again: the build does not restart it. "Open at login" is
-only reliable with the app installed (`--install`): registered from `build/`, the
-path may stop existing.
+is generated from the blob with `scripts/make-icon.sh`. `scripts/build-app.sh` alone
+does not restart anything: quit the app and open it again to see a change.
+`scripts/install.sh` does it all for the installed copy. The local build shows a
+**DEV** marker next to the menu bar icon, so when both copies are open you know
+which one is which (they share the same settings and both listen to the media
+keys, so close one). "Open at login" is only reliable with the installed copy:
+registered from `build/`, the path may stop existing.
 
 ## Testing
 

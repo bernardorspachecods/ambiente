@@ -428,6 +428,14 @@ import Testing
         #expect(again)
     }
 
+    @Test func tellsTheInstalledAppFromTheLocalBuild() {
+        #expect(installedState("/Applications/Ambiente.app"))
+        #expect(installedState("/Users/me/Applications/Ambiente.app"))
+        #expect(!installedState("/Users/me/ambiente/build/Ambiente.app"))
+        #expect(!installedState("/Users/other/Applications/Ambiente.app"))
+        #expect(!installedState("/Applications-old/Ambiente.app"))
+    }
+
     @Test func singleTrackFolderNeverSkips() {
         var guardRail = PlaybackFailureGuard()
         let skip = guardRail.shouldSkip(afterFailureIn: 1)

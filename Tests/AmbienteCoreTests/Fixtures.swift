@@ -102,3 +102,7 @@ func choiceName(updated: Double?, bundled: Double?) -> String {
     case nil: return "none"
     }
 }
+
+func installedState(_ path: String) -> Bool {
+    AppLocation.isInstalled(bundlePath: path, home: "/Users/me")
+}

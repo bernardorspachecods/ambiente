@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds build/Ambiente.app (release, ad-hoc signed). Pass --install to copy it to ~/Applications.
+# Builds build/Ambiente.app (release, ad-hoc signed). To install it, use scripts/install.sh.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -22,10 +22,3 @@ mkdir -p "$APP/Contents/Resources/MenuIcon"
 cp Resources/MenuIcon/*.png "$APP/Contents/Resources/MenuIcon/"
 codesign --force --sign - "$APP"
 echo "Built $APP"
-
-if [ "${1:-}" = "--install" ]; then
-  mkdir -p ~/Applications
-  rm -rf ~/Applications/Ambiente.app
-  cp -R "$APP" ~/Applications/Ambiente.app
-  echo "Installed ~/Applications/Ambiente.app"
-fi

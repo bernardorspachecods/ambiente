@@ -54,3 +54,11 @@ public struct PlaybackFailureGuard: Sendable {
 
     public mutating func recordSuccess() { failures = 0 }
 }
+
+public enum AppLocation {
+    /// True when the app runs from an Applications folder (the installed copy); false for the
+    /// local build in `build/`, which shows a DEV marker so the two can be told apart.
+    public static func isInstalled(bundlePath: String, home: String) -> Bool {
+        bundlePath.hasPrefix("/Applications/") || bundlePath.hasPrefix(home + "/Applications/")
+    }
+}

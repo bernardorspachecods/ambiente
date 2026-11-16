@@ -36,9 +36,10 @@ scripts/build-app.sh        # builds build/Ambiente.app (ad-hoc signed)
 open build/Ambiente.app
 ```
 
-`scripts/build-app.sh --install` also copies the app to `~/Applications`
-(recommended if you want *Open at login*). The binaries are downloaded at build
-time and are not part of this repository.
+`scripts/install.sh` builds, installs into `/Applications` and opens it
+(recommended if you want *Open at login*). A build run from `build/` shows a DEV
+marker in the menu bar. The binaries are downloaded at build time and are not part
+of this repository.
 
 Run the tests (the flags work around the Testing framework layout of the Command Line Tools):
 
