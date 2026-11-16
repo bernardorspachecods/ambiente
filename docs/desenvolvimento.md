@@ -25,7 +25,7 @@ scripts/build-app.sh --install   # e copia para ~/Applications
 open build/Ambiente.app
 ```
 
-`vendor/` e `build/` não são versionados. "Open at login" só é fiável com a app
+`vendor/` e `build/` não são versionados. O ícone da app (`Resources/AppIcon.icns`) gera-se a partir do blob com `scripts/make-icon.sh`. "Open at login" só é fiável com a app
 instalada (`--install`): registada a partir de `build/`, o caminho pode deixar de
 existir. Para ver uma alteração é preciso
 fechar a app (Quit) e voltar a abrir: o build não a reinicia.

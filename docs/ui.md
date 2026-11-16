@@ -52,3 +52,7 @@ Um blobatar azul ([blobatar.dev](https://blobatar.dev), MIT) para o nome
 boca em nenhuma expressão. Os SVG em `Resources/MenuIcon/` são a fonte; os PNG
 são renders de 72 px com a área cortada ao blob. Sem os PNG no bundle, a app
 volta aos símbolos do sistema.
+
+O ícone da app (`Resources/AppIcon.icns`, visível no Finder e nas definições de
+arranque; a app não tem ícone no Dock) é o mesmo blob sobre um quadrado
+arredondado claro, gerado por `scripts/make-icon.sh`.
