@@ -102,6 +102,35 @@ import Testing
     }
 }
 
+@Suite struct PlayQueueSelectTests {
+    @Test func selectStartsOnChosenTrackInBothModes() {
+        var shuffled = PlayQueue(tracks: urls(["a", "b", "c"]), shuffled: true)
+        let okShuffled = shuffled.select(url("c"))
+        #expect(okShuffled)
+        #expect(shuffled.current == url("c"))
+        var ordered = PlayQueue(tracks: urls(["a", "b", "c"]), shuffled: false)
+        let okOrdered = ordered.select(url("b"))
+        #expect(okOrdered)
+        let next = ordered.next()
+        #expect(next == url("c"))
+    }
+
+    @Test func selectRejectsUnknownTrack() {
+        var queue = PlayQueue(tracks: urls(["a"]), shuffled: false)
+        let ok = queue.select(url("z"))
+        #expect(!ok)
+    }
+
+    @Test func renameKeepsPositionAndOrder() {
+        var queue = PlayQueue(tracks: urls(["a", "b", "c"]), shuffled: false)
+        queue.next()
+        queue.rename(from: url("b"), to: url("x"))
+        #expect(queue.current == url("x"))
+        let next = queue.next()
+        #expect(next == url("c"))
+    }
+}
+
 @Suite struct AudioLibraryTests {
     @Test func listsFoldersAndAudioOnly() throws {
         let root = try makeLibraryFixture()

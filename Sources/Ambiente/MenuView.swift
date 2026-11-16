@@ -8,6 +8,11 @@ struct MenuView: View {
 
     @State private var showSettings = false
     @State private var scrubTime: Double?
+    @State private var showAddByLink = false
+    @State private var expanded: Set<String> = []
+    @State private var renaming: URL?
+    @State private var renameText = ""
+    @State private var renameError: String?
     @State private var link = ""
     @State private var targetName = ""
     @State private var newName = ""
@@ -27,6 +32,8 @@ struct MenuView: View {
         .frame(width: 300)
         .onAppear {
             showSettings = false
+            renaming = nil
+            if case .downloading = downloads.state {} else { showAddByLink = false }
             player.refreshFolders()
             if targetName != Self.newTag, !player.folders.contains(where: { $0.name == targetName }) {
                 targetName = player.activeFolder?.name ?? player.folders.first?.name ?? Self.newTag
@@ -67,17 +74,39 @@ struct MenuView: View {
     }
 
     private var nowPlaying: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(player.trackTitle ?? "Nothing playing")
-                .font(.headline)
-                .lineLimit(2)
-            if let artist = player.trackArtist {
-                Text(artist).foregroundStyle(.secondary).lineLimit(1)
+        HStack(spacing: 10) {
+            artworkView
+            VStack(alignment: .leading, spacing: 2) {
+                Text(player.trackTitle ?? "Nothing playing")
+                    .font(.headline)
+                    .lineLimit(2)
+                if let artist = player.trackArtist {
+                    Text(artist).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Text(player.activeFolder.map { "\($0.name) · \($0.trackCountLabel(player.trackCount))" } ?? "Choose an ambiente")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            Text(player.activeFolder.map { "\($0.name) · \($0.trackCountLabel(player.trackCount))" } ?? "Choose an ambiente")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
         }
+    }
+
+    private var artworkView: some View {
+        Group {
+            if let artwork = player.artwork {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "music.note")
+                    .imageScale(.large)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.quaternary)
+            }
+        }
+        .frame(width: 56, height: 56)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var controls: some View {
@@ -141,7 +170,44 @@ struct MenuView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            ForEach(player.folders) { folder in
+            if let renameError {
+                Label(renameError, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(player.folders) { folder in
+                        folderRow(folder)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 240)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func folderRow(_ folder: AmbienteFolder) -> some View {
+        DisclosureGroup(isExpanded: Binding(
+            get: { expanded.contains(folder.id) },
+            set: { if $0 { expanded.insert(folder.id) } else { expanded.remove(folder.id) } }
+        )) {
+            let _ = player.libraryVersion
+            let tracks = player.tracks(in: folder)
+            VStack(alignment: .leading, spacing: 2) {
+                if tracks.isEmpty {
+                    Text("No tracks yet").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(tracks, id: \.self) { track in
+                    trackRow(track, in: folder)
+                }
+            }
+            .padding(.top, 2)
+        } label: {
+            if renaming == folder.url {
+                renameField { try player.renameFolder(folder, to: $0) }
+            } else {
                 HStack {
                     Button {
                         player.select(folder)
@@ -164,15 +230,78 @@ struct MenuView: View {
                     .controlSize(.small)
                     .help("Open \(folder.name) in Finder")
                 }
+                .contextMenu {
+                    Button("Rename…") { beginRename(folder.url, text: folder.name) }
+                    Button("Show in Finder") { NSWorkspace.shared.open(folder.url) }
+                }
             }
         }
+    }
+
+    private func trackRow(_ track: URL, in folder: AmbienteFolder) -> some View {
+        let name = track.deletingPathExtension().lastPathComponent
+        let isCurrent = player.activeFolder == folder && player.currentTrack == track
+        return Group {
+            if renaming == track {
+                renameField { try player.renameTrack(track, to: $0) }
+            } else {
+                Button {
+                    player.play(track: track, in: folder)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isCurrent ? (player.isPlaying ? "speaker.wave.2.fill" : "speaker.fill") : "music.note")
+                            .font(.caption)
+                            .frame(width: 14)
+                            .foregroundStyle(isCurrent ? Color.accentColor : Color.secondary)
+                        Text(name)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Rename…") { beginRename(track, text: name) }
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([track]) }
+                }
+            }
+        }
+    }
+
+    private func beginRename(_ url: URL, text: String) {
+        renameError = nil
+        renameText = text
+        renaming = url
+    }
+
+    /// Inline text field: Return saves, Esc cancels.
+    private func renameField(commit: @escaping (String) throws -> Void) -> some View {
+        TextField("Name", text: $renameText)
+            .textFieldStyle(.roundedBorder)
+            .onSubmit {
+                do {
+                    try commit(renameText)
+                    renameError = nil
+                    renaming = nil
+                } catch {
+                    renameError = error.localizedDescription
+                }
+            }
+            .onExitCommand { renaming = nil; renameError = nil }
     }
 
     // MARK: Add by link
 
     private var addByLink: some View {
+        DisclosureGroup("Add by link", isExpanded: $showAddByLink) {
+            addByLinkContent.padding(.top, 6)
+        }
+    }
+
+    private var addByLinkContent: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Add by link").font(.subheadline).foregroundStyle(.secondary)
             TextField("Paste a YouTube link", text: $link)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(startDownload)

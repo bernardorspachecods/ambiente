@@ -69,6 +69,27 @@ public struct PlayQueue: Sendable {
         return current
     }
 
+    /// Makes `track` the current one. When shuffled, the rest of the round is
+    /// reshuffled after it. Returns false if the track is not in the queue.
+    @discardableResult
+    public mutating func select(_ track: URL) -> Bool {
+        guard tracks.contains(track) else { return false }
+        if isShuffled {
+            order = [track] + shuffler(tracks.filter { $0 != track })
+            position = 0
+        } else {
+            order = tracks
+            position = tracks.firstIndex(of: track) ?? 0
+        }
+        return true
+    }
+
+    /// Replaces a track's URL after the file was renamed, keeping the order.
+    public mutating func rename(from old: URL, to new: URL) {
+        order = order.map { $0 == old ? new : $0 }
+        tracks = tracks.map { $0 == old ? new : $0 }
+    }
+
     /// Goes back to the first track of the round.
     public mutating func rewind() { position = 0 }
 
