@@ -17,6 +17,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Ambiente"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp vendor/yt-dlp vendor/ffmpeg "$APP/Contents/Resources/"
+mkdir -p "$APP/Contents/Resources/MenuIcon"
+cp Resources/MenuIcon/*.png "$APP/Contents/Resources/MenuIcon/"
 codesign --force --sign - "$APP"
 echo "Built $APP"
 

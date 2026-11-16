@@ -9,7 +9,11 @@ struct AmbienteApp: App {
         MenuBarExtra {
             MenuView(player: player, downloads: downloads)
         } label: {
-            Image(systemName: player.isPlaying ? "waveform" : "music.note")
+            if let icon = player.isPlaying ? MenuIcon.playing : MenuIcon.paused {
+                Image(nsImage: icon)
+            } else {
+                Image(systemName: player.isPlaying ? "waveform" : "music.note")
+            }
         }
         .menuBarExtraStyle(.window)
     }

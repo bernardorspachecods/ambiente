@@ -17,6 +17,7 @@ Package Manager.
 | `Sources/Ambiente/` | The app: `PlayerModel` (AVPlayer, Now Playing, media keys), `DownloadModel` (yt-dlp process and updater), `Binaries`, SwiftUI `MenuView`. |
 | `Tests/AmbienteCoreTests/` | Swift Testing tests for the core. |
 | `Resources/Info.plist` | Bundle metadata, including `LSUIElement`. |
+| `Resources/MenuIcon/` | Menu bar icon: a [blobatar](https://blobatar.dev) (MIT) for the name "Simpilco", `happy` face for playing and `sleepy` for paused (dimmed in code). The SVGs are the source; the PNGs are 72 px renders with the viewBox cropped to the blob. |
 | `scripts/` | `fetch-binaries.sh` and `build-app.sh`. |
 
 ## Test
