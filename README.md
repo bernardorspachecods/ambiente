@@ -72,3 +72,8 @@ Portuguese; the app's interface is in English.
   check its license before redistributing anything).
 - The menu bar icon and app icon are generated with
   [blobatar](https://blobatar.dev) (MIT).
+
+## License
+
+[MIT](LICENSE). This covers the code in this repository, not yt-dlp, FFmpeg or the
+blobatar artwork, which keep their own licenses.
