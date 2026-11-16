@@ -99,6 +99,11 @@ public struct PlayQueue: Sendable {
     public mutating func update(tracks newTracks: [URL]) -> Bool {
         let available = Set(newTracks)
         guard let playing = current, available.contains(playing) else { return false }
+        // Nothing added or removed: keep the planned order (this runs every time the menu opens).
+        if isShuffled, available == Set(order) {
+            tracks = newTracks
+            return true
+        }
         if isShuffled {
             let played = order[..<position].filter(available.contains)
             let known = Set(order)

@@ -87,6 +87,7 @@ final class PlayerModel {
                 if savedTime > 1 {
                     player.seek(to: CMTime(seconds: savedTime, preferredTimescale: 600))
                     currentTime = savedTime
+                    savePosition()  // load() reset the stored time to 0
                     updateNowPlaying()
                 }
             }
@@ -179,7 +180,11 @@ final class PlayerModel {
             trackCount = all.count
             queue = PlayQueue(tracks: all, shuffled: shuffle)
         }
-        guard queue.select(track) else { return }
+        if !queue.select(track) {
+            // The list on screen can be newer than the queue (file added outside the app).
+            reloadActiveTracks()
+            guard queue.select(track) else { return }
+        }
         playCurrent()
     }
 

@@ -131,6 +131,19 @@ import Testing
     }
 }
 
+@Suite struct PlayQueueStabilityTests {
+    @Test func updateWithSameTracksKeepsUpcomingOrder() {
+        // A shuffler that reverses would visibly change the order if update reshuffled.
+        var queue = PlayQueue(tracks: urls(["a", "b", "c", "d"]), shuffled: true, shuffler: { $0.reversed() })
+        let before = [queue.current, queue.next(), queue.next(), queue.next()]
+        queue.rewind()
+        let kept = queue.update(tracks: urls(["a", "b", "c", "d"]))
+        let after = [queue.current, queue.next(), queue.next(), queue.next()]
+        #expect(kept)
+        #expect(before == after)
+    }
+}
+
 @Suite struct AudioLibraryTests {
     @Test func listsFoldersAndAudioOnly() throws {
         let root = try makeLibraryFixture()
