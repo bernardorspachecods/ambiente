@@ -65,6 +65,7 @@ struct MenuView: View {
                 Image(systemName: "speaker.wave.3.fill")
             }
             .labelsHidden()
+            .focusable(false)
 
             Divider()
             environmentList
@@ -74,9 +75,11 @@ struct MenuView: View {
             Divider()
             HStack {
                 Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                .focusable(false)
                     .help("Settings")
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
+                .focusable(false)
             }
             .buttonStyle(.link)
         }
@@ -127,17 +130,22 @@ struct MenuView: View {
                         .foregroundStyle(player.shuffle ? Color.accentColor : Color.secondary)
                 }
                 .help(player.shuffle ? "Shuffle on" : "Shuffle off")
+                .focusable(false)
                 Button(action: player.previous) { Image(systemName: "backward.fill") }
+                .focusable(false)
                 Button(action: player.togglePlayPause) {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .frame(width: 20)
                 }
+                .focusable(false)
                 Button(action: player.next) { Image(systemName: "forward.fill") }
+                .focusable(false)
                 Button(action: player.cycleRepeat) {
                     Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
                         .foregroundStyle(player.repeatMode == .off ? Color.secondary : Color.accentColor)
                 }
                 .help(Self.repeatHelp(player.repeatMode))
+                .focusable(false)
             }
             .buttonStyle(.borderless)
             .imageScale(.large)
@@ -162,6 +170,7 @@ struct MenuView: View {
             .controlSize(.small)
             .labelsHidden()
             .disabled(player.duration <= 0)
+            .focusable(false)
             HStack {
                 Text(Self.format(scrubTime ?? player.currentTime))
                 Spacer()
@@ -223,6 +232,7 @@ struct MenuView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                     Button {
                         player.select(folder)
                     } label: {
@@ -231,6 +241,7 @@ struct MenuView: View {
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .help("Play \(folder.name)")
+                    .focusable(false)
                     Button {
                         NSWorkspace.shared.open(folder.url)
                     } label: {
@@ -239,6 +250,7 @@ struct MenuView: View {
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .help("Open \(folder.name) in Finder")
+                    .focusable(false)
                 }
                 .contextMenu {
                     Button("Rename…") { beginRename(folder.url, text: folder.name) }
@@ -294,6 +306,7 @@ struct MenuView: View {
                     Divider()
                     Button("Move to Trash…", role: .destructive) { pendingDelete = track }
                 }
+                .focusable(false)
             }
         }
     }
@@ -311,6 +324,7 @@ struct MenuView: View {
                     .font(.callout)
                 HStack {
                     Button("Cancel") { pendingDelete = nil }
+                    .focusable(false)
                     Button("Move to Trash", role: .destructive) {
                         do {
                             try player.moveToTrash(url)
@@ -320,6 +334,7 @@ struct MenuView: View {
                         }
                         pendingDelete = nil
                     }
+                    .focusable(false)
                 }
             }
             .padding(8)
@@ -365,6 +380,7 @@ struct MenuView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .focusable(false)
             if showAddByLink { addByLinkContent }
         }
     }
@@ -384,7 +400,9 @@ struct MenuView: View {
                     Text("New ambiente…").tag(Self.newTag)
                 }
                 .labelsHidden()
+                .focusable(false)
                 Button("Download", action: startDownload)
+                .focusable(false)
                     .disabled(link.isEmpty || resolvedTarget() == nil)
             }
             if targetName == Self.newTag {
@@ -413,6 +431,7 @@ struct MenuView: View {
                     .truncationMode(.middle)
                 Spacer()
                 Button { downloads.remove(job.id) } label: { Image(systemName: "xmark") }
+                .focusable(false)
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .help(job.isActive ? "Cancel" : "Dismiss")
@@ -459,6 +478,7 @@ struct MenuView: View {
                         .font(.callout)
                     Spacer()
                     Button("Update", action: downloads.updateYtDlp)
+                    .focusable(false)
                         .disabled(downloads.isBusy)
                 }
             }
@@ -471,11 +491,13 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button { showSettings = false } label: { Image(systemName: "chevron.left") }
+                .focusable(false)
                     .buttonStyle(.borderless)
                 Text("Settings").font(.headline)
             }
             settingsSection("General") {
                 Toggle("Open at login", isOn: $launchAtLogin)
+                .focusable(false)
                     .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
                 if let loginError {
                     Text(loginError).font(.caption).foregroundStyle(.red)
@@ -487,6 +509,7 @@ struct MenuView: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 Button("Open in Finder") { NSWorkspace.shared.open(player.root) }
+                .focusable(false)
             }
             settingsSection("Downloads") {
                 HStack {
@@ -495,12 +518,14 @@ struct MenuView: View {
                     Text(downloads.installedVersion ?? "—").foregroundStyle(.secondary)
                 }
                 Button("Check for update") { downloads.checkForUpdate(force: true) }
+                .focusable(false)
                     .disabled(downloads.isBusy)
                 if downloads.updateAvailable, let latest = downloads.latestVersion {
                     HStack {
                         Text("Version \(latest) available").font(.callout)
                         Spacer()
                         Button("Update", action: downloads.updateYtDlp)
+                        .focusable(false)
                             .disabled(downloads.isBusy)
                     }
                 }

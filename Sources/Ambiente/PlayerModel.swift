@@ -51,6 +51,18 @@ final class PlayerModel {
         static let volume = "volume"
         static let shuffle = "shuffle"
         static let repeatMode = "repeatMode"
+        static let track = "lastTrackPath"
+        static let time = "lastTrackTime"
+    }
+
+    /// Remembers what is playing and where, so the next launch can resume it.
+    @ObservationIgnored private var lastSave = Date.distantPast
+
+    private func savePosition() {
+        guard let track = queue.current else { return }
+        UserDefaults.standard.set(track.path, forKey: Keys.track)
+        UserDefaults.standard.set(currentTime, forKey: Keys.time)
+        lastSave = Date()
     }
 
     init(root: URL = AudioLibrary.defaultRoot) {
@@ -62,10 +74,27 @@ final class PlayerModel {
         player.volume = Float(volume)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         refreshFolders()
-        // Restore the last ambiente (ready to play, not auto-playing).
+        // Restore the last ambiente, track and position (ready to resume, not auto-playing).
+        let savedTrack = UserDefaults.standard.string(forKey: Keys.track)
+        let savedTime = UserDefaults.standard.double(forKey: Keys.time)
         if let name = UserDefaults.standard.string(forKey: Keys.folder),
            let folder = folders.first(where: { $0.name == name }) {
             select(folder, autoplay: false)
+            if let savedTrack,
+               let track = AudioLibrary.tracks(in: folder.url).first(where: { $0.path == savedTrack }),
+               queue.select(track) {
+                prepareCurrent()
+                if savedTime > 1 {
+                    player.seek(to: CMTime(seconds: savedTime, preferredTimescale: 600))
+                    currentTime = savedTime
+                    updateNowPlaying()
+                }
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.savePosition() }
         }
         setupRemoteCommands()
         timeObserver = player.addPeriodicTimeObserver(
@@ -75,6 +104,7 @@ final class PlayerModel {
                 guard let self else { return }
                 let seconds = time.seconds
                 if seconds.isFinite { self.currentTime = seconds }
+                if self.isPlaying, Date().timeIntervalSince(self.lastSave) > 5 { self.savePosition() }
             }
         }
     }
@@ -82,6 +112,7 @@ final class PlayerModel {
     func seek(to seconds: Double) {
         currentTime = seconds
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+        savePosition()
         updateNowPlaying()
     }
 
@@ -241,6 +272,7 @@ final class PlayerModel {
         if isPlaying {
             player.pause()
             isPlaying = false
+            savePosition()
             updateNowPlaying()
         } else if player.currentItem != nil {
             player.play()
@@ -328,6 +360,8 @@ final class PlayerModel {
         }
         currentTime = 0
         duration = 0
+        UserDefaults.standard.set(url.path, forKey: Keys.track)
+        UserDefaults.standard.set(0.0, forKey: Keys.time)
         let item = AVPlayerItem(url: url)
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
