@@ -8,19 +8,34 @@ final class DownloadModel {
     enum State: Equatable {
         case idle
         case downloading(progress: Double?)
-        case done(String)
+        case done(folder: URL)
         case failed(String)
     }
 
     enum UpdateState: Equatable {
         case idle
         case updating
-        case updated(String)
         case failed(String)
     }
 
     private(set) var state: State = .idle
     private(set) var updateState: UpdateState = .idle
+    private(set) var installedVersion: String?
+    private(set) var latestVersion: String?
+    @ObservationIgnored private var lastCheck: Date?
+
+    /// True only when GitHub has a newer yt-dlp than the one in use.
+    var updateAvailable: Bool {
+        guard let installed = installedVersion, let latest = latestVersion else { return false }
+        return Self.isNewer(latest, than: installed)
+    }
+
+    nonisolated static func isNewer(_ a: String, than b: String) -> Bool {
+        let x = a.split(separator: ".").compactMap { Int($0) }
+        let y = b.split(separator: ".").compactMap { Int($0) }
+        guard !x.isEmpty, !y.isEmpty else { return false }
+        return x.lexicographicallyPrecedes(y) == false && x != y
+    }
 
     var isBusy: Bool {
         if case .downloading = state { return true }
@@ -33,11 +48,11 @@ final class DownloadModel {
     func download(link: String, into folder: AmbienteFolder, onFinish: @escaping () -> Void) {
         guard !isBusy else { return }
         guard let url = YouTubeDownload.validatedURL(link) else {
-            state = .failed("Isto não parece um link válido (http/https).")
+            state = .failed("That doesn't look like a valid link (http/https).")
             return
         }
         guard let ytDlp = Binaries.ytDlp else {
-            state = .failed("yt-dlp não encontrado na app. Corre scripts/fetch-binaries.sh e volta a gerar a app.")
+            state = .failed("yt-dlp not found in the app. Run scripts/fetch-binaries.sh and rebuild the app.")
             return
         }
         state = .downloading(progress: nil)
@@ -68,7 +83,7 @@ final class DownloadModel {
                 guard let self else { return }
                 self.process = nil
                 if status == 0 {
-                    self.state = .done("Faixa adicionada a \(folder.name).")
+                    self.state = .done(folder: folder.url)
                     onFinish()
                 } else if finished.terminationReason == .uncaughtSignal {
                     self.state = .idle
@@ -82,7 +97,7 @@ final class DownloadModel {
             process = proc
         } catch {
             pipe.fileHandleForReading.readabilityHandler = nil
-            state = .failed("Não consegui executar o yt-dlp: \(error.localizedDescription)")
+            state = .failed("Could not run yt-dlp: \(error.localizedDescription)")
         }
     }
 
@@ -94,7 +109,21 @@ final class DownloadModel {
         if !isBusy { state = .idle }
     }
 
-    // MARK: yt-dlp updater
+    // MARK: yt-dlp updates
+
+    /// Reads the installed version and asks GitHub for the latest one.
+    /// Throttled to once every 6 hours unless `force` is set; failures stay silent.
+    func checkForUpdate(force: Bool = false) {
+        if !force, let lastCheck, Date().timeIntervalSince(lastCheck) < 6 * 3600 { return }
+        guard let ytDlp = Binaries.ytDlp else { return }
+        lastCheck = Date()
+        Task {
+            let installed = await Task.detached { try? Self.run(ytDlp, ["--version"]) }.value
+            let latest = await Task.detached { try? await Self.fetchLatestVersion() }.value
+            if let installed { installedVersion = installed }
+            if let latest { latestVersion = latest }
+        }
+    }
 
     /// Downloads the latest standalone yt-dlp into Application Support and checks it runs.
     func updateYtDlp() {
@@ -103,18 +132,27 @@ final class DownloadModel {
         Task {
             do {
                 let version = try await Self.fetchLatestYtDlp()
-                updateState = .updated("yt-dlp \(version)")
+                installedVersion = version
+                latestVersion = version
+                updateState = .idle
             } catch {
                 updateState = .failed(error.localizedDescription)
             }
         }
     }
 
+    private nonisolated static func fetchLatestVersion() async throws -> String {
+        let url = URL(string: "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")!
+        let (data, _) = try await URLSession.shared.data(from: url)
+        struct Release: Decodable { let tag_name: String }
+        return try JSONDecoder().decode(Release.self, from: data).tag_name
+    }
+
     private nonisolated static func fetchLatestYtDlp() async throws -> String {
         let source = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos")!
         let (temp, response) = try await URLSession.shared.download(from: source)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw UpdateError("O GitHub não respondeu como esperado.")
+            throw UpdateError("GitHub did not respond as expected.")
         }
         let fm = FileManager.default
         try fm.createDirectory(at: Binaries.supportDirectory, withIntermediateDirectories: true)
@@ -125,7 +163,7 @@ final class DownloadModel {
 
         // Only replace the working copy if the new one actually runs.
         let version = try run(staged, ["--version"])
-        guard !version.isEmpty else { throw UpdateError("O yt-dlp descarregado não arranca.") }
+        guard !version.isEmpty else { throw UpdateError("The downloaded yt-dlp does not start.") }
         _ = try fm.replaceItemAt(Binaries.updatedYtDlp, withItemAt: staged)
         return version
     }
@@ -140,7 +178,7 @@ final class DownloadModel {
         try proc.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         proc.waitUntilExit()
-        guard proc.terminationStatus == 0 else { throw UpdateError("O yt-dlp descarregado não arranca.") }
+        guard proc.terminationStatus == 0 else { throw UpdateError("The downloaded yt-dlp does not start.") }
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

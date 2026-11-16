@@ -44,6 +44,6 @@ public enum YouTubeDownload {
         let line = output.split(whereSeparator: \.isNewline)
             .last { $0.hasPrefix("ERROR:") }
             .map { String($0.dropFirst("ERROR:".count)).trimmingCharacters(in: .whitespaces) }
-        return line ?? "O download falhou."
+        return line ?? "The download failed."
     }
 }

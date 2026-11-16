@@ -6,14 +6,37 @@ struct MenuView: View {
     @Bindable var player: PlayerModel
     var downloads: DownloadModel
 
+    @State private var showSettings = false
     @State private var link = ""
     @State private var targetName = ""
     @State private var newName = ""
-    private static let newTag = "\u{0}new"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
+    private static let newTag = "\u{0}new"
 
     var body: some View {
+        Group {
+            if showSettings {
+                settings
+            } else {
+                main
+            }
+        }
+        .padding(12)
+        .frame(width: 300)
+        .onAppear {
+            showSettings = false
+            player.refreshFolders()
+            if targetName != Self.newTag, !player.folders.contains(where: { $0.name == targetName }) {
+                targetName = player.activeFolder?.name ?? player.folders.first?.name ?? Self.newTag
+            }
+            downloads.checkForUpdate()
+        }
+    }
+
+    // MARK: Main page
+
+    private var main: some View {
         VStack(alignment: .leading, spacing: 12) {
             nowPlaying
             controls
@@ -30,28 +53,27 @@ struct MenuView: View {
             environmentList
             Divider()
             addByLink
+            updateBanner
             Divider()
-            footer
-        }
-        .padding(12)
-        .frame(width: 300)
-        .onAppear {
-            player.refreshFolders()
-            if targetName != Self.newTag, !player.folders.contains(where: { $0.name == targetName }) {
-                targetName = player.activeFolder?.name ?? player.folders.first?.name ?? Self.newTag
+            HStack {
+                Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                    .help("Settings")
+                Spacer()
+                Button("Quit") { NSApplication.shared.terminate(nil) }
             }
+            .buttonStyle(.link)
         }
     }
 
     private var nowPlaying: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(player.trackTitle ?? "Nada a tocar")
+            Text(player.trackTitle ?? "Nothing playing")
                 .font(.headline)
                 .lineLimit(2)
             if let artist = player.trackArtist {
                 Text(artist).foregroundStyle(.secondary).lineLimit(1)
             }
-            Text(player.activeFolder.map { "\($0.name) · \(player.trackCount) faixas" } ?? "Escolhe um ambiente")
+            Text(player.activeFolder.map { "\($0.name) · \($0.trackCountLabel(player.trackCount))" } ?? "Choose an ambiente")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -74,53 +96,71 @@ struct MenuView: View {
     }
 
     private var environmentList: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             if player.folders.isEmpty {
-                Text("Cria subpastas em \(player.root.path(percentEncoded: false)) — cada uma é um ambiente.")
+                Text("Create subfolders in \(Self.display(player.root)): each one is an ambiente.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             ForEach(player.folders) { folder in
-                Button {
-                    player.select(folder)
-                } label: {
-                    HStack {
-                        Image(systemName: "checkmark")
-                            .opacity(folder == player.activeFolder ? 1 : 0)
-                        Text(folder.name)
-                        Spacer()
+                HStack {
+                    Button {
+                        player.select(folder)
+                    } label: {
+                        HStack {
+                            Image(systemName: "checkmark")
+                                .opacity(folder == player.activeFolder ? 1 : 0)
+                            Text(folder.name)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    Button {
+                        NSWorkspace.shared.open(folder.url)
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Open \(folder.name) in Finder")
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
+    // MARK: Add by link
+
     private var addByLink: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Adicionar por link").font(.subheadline).foregroundStyle(.secondary)
-            TextField("Colar link do YouTube", text: $link)
+            Text("Add by link").font(.subheadline).foregroundStyle(.secondary)
+            TextField("Paste a YouTube link", text: $link)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(startDownload)
             HStack {
                 Picker("Ambiente", selection: $targetName) {
                     ForEach(player.folders) { Text($0.name).tag($0.name) }
                     if !player.folders.isEmpty { Divider() }
-                    Text("Novo ambiente…").tag(Self.newTag)
+                    Text("New ambiente…").tag(Self.newTag)
                 }
                 .labelsHidden()
                 if case .downloading = downloads.state {
-                    Button("Cancelar", action: downloads.cancel)
+                    Button("Cancel", action: downloads.cancel)
                 } else {
-                    Button("Descarregar", action: startDownload)
+                    Button("Download", action: startDownload)
                         .disabled(link.isEmpty || resolvedTarget() == nil || downloads.isBusy)
                 }
             }
             if targetName == Self.newTag {
-                TextField("Nome do novo ambiente", text: $newName)
+                TextField("New ambiente name", text: $newName)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(startDownload)
+            }
+            if let target = resolvedTarget(), downloads.state == .idle {
+                Label("Saves to \(Self.display(target.url))", systemImage: "arrow.down.to.line")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
             downloadStatus
         }
@@ -136,8 +176,14 @@ struct MenuView: View {
             } else {
                 ProgressView().progressViewStyle(.linear)
             }
-        case .done(let message):
-            Label(message, systemImage: "checkmark.circle").font(.callout)
+        case .done(let folder):
+            HStack(alignment: .firstTextBaseline) {
+                Label("Saved to \(Self.display(folder))", systemImage: "checkmark.circle")
+                    .font(.callout)
+                Spacer()
+                Button("Show") { NSWorkspace.shared.open(folder) }
+                    .buttonStyle(.link)
+            }
         case .failed(let message):
             Label(message, systemImage: "exclamationmark.triangle")
                 .font(.callout)
@@ -146,33 +192,61 @@ struct MenuView: View {
         }
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Abrir no arranque", isOn: $launchAtLogin)
+    // MARK: yt-dlp update notice (only when there is something to say)
+
+    @ViewBuilder private var updateBanner: some View {
+        switch downloads.updateState {
+        case .updating:
+            HStack {
+                ProgressView().controlSize(.small)
+                Text("Updating yt-dlp…").font(.callout)
+            }
+        case .failed(let message):
+            Label("Update failed: \(message)", systemImage: "exclamationmark.triangle")
+                .font(.callout)
+                .foregroundStyle(.red)
+        case .idle:
+            if downloads.updateAvailable, let latest = downloads.latestVersion {
+                HStack {
+                    Label("yt-dlp \(latest) available", systemImage: "arrow.down.circle")
+                        .font(.callout)
+                    Spacer()
+                    Button("Update", action: downloads.updateYtDlp)
+                        .disabled(downloads.isBusy)
+                }
+            }
+        }
+    }
+
+    // MARK: Settings page
+
+    private var settings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button { showSettings = false } label: { Image(systemName: "chevron.left") }
+                    .buttonStyle(.borderless)
+                Text("Settings").font(.headline)
+            }
+            Toggle("Open at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
             if let loginError {
                 Text(loginError).font(.caption).foregroundStyle(.red)
             }
+            Divider()
             HStack {
-                Button("Atualizar yt-dlp", action: downloads.updateYtDlp)
-                    .disabled(downloads.isBusy)
-                updateStatus
+                Text("yt-dlp")
                 Spacer()
-                Button("Abrir pasta") { NSWorkspace.shared.open(player.root) }
-                Button("Sair") { NSApplication.shared.terminate(nil) }
+                Text(downloads.installedVersion ?? "—").foregroundStyle(.secondary)
             }
-            .buttonStyle(.link)
+            Button("Check for yt-dlp update") {
+                downloads.checkForUpdate(force: true)
+            }
+            .disabled(downloads.isBusy)
+            Button("Open library folder") { NSWorkspace.shared.open(player.root) }
         }
     }
 
-    @ViewBuilder private var updateStatus: some View {
-        switch downloads.updateState {
-        case .idle: EmptyView()
-        case .updating: ProgressView().controlSize(.small)
-        case .updated(let text): Text(text).font(.caption).foregroundStyle(.secondary)
-        case .failed(let text): Text(text).font(.caption).foregroundStyle(.red)
-        }
-    }
+    // MARK: Helpers
 
     /// The chosen folder, or the one that would be created for a new name.
     private func resolvedTarget() -> AmbienteFolder? {
@@ -208,4 +282,12 @@ struct MenuView: View {
             launchAtLogin = SMAppService.mainApp.status == .enabled
         }
     }
+
+    private static func display(_ url: URL) -> String {
+        (url.path(percentEncoded: false) as NSString).abbreviatingWithTildeInPath
+    }
+}
+
+private extension AmbienteFolder {
+    func trackCountLabel(_ count: Int) -> String { count == 1 ? "1 track" : "\(count) tracks" }
 }

@@ -109,6 +109,6 @@ import Testing
     @Test func extractsReadableError() {
         let out = "[youtube] x: Downloading\nERROR: [youtube] x: Video unavailable\n"
         #expect(YouTubeDownload.errorMessage(fromOutput: out) == "[youtube] x: Video unavailable")
-        #expect(YouTubeDownload.errorMessage(fromOutput: "") == "O download falhou.")
+        #expect(YouTubeDownload.errorMessage(fromOutput: "") == "The download failed.")
     }
 }
